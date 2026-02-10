@@ -7,7 +7,7 @@ class Config:
     # --- 环境设置 (关键修改) ---
     num_users = 10  # 减少用户数，降低冗余，让掉队变得致命
     num_edge_servers = 1  # 简化为一个边缘服务器，便于观察
-    straggler_prob = 0.3  #掉队率
+    straggler_prob = 0.6  #掉队率
     num_global_rounds = 30  #全局训练次数
     num_local_epochs = 3    #本地训练次数
     batch_size = 32
