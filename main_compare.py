@@ -1,3 +1,4 @@
+" 比较fedavg(base_line)，LOGIT，DM的收敛精确度 "
 import torch
 import matplotlib.pyplot as plt
 import numpy as np
