@@ -23,8 +23,8 @@ def test_model(model, dataset):
     return 100. * correct / len(dataset)
 
 
-def run_simulation(enable_diffusion=False):
-    print(f"\n>>> 开始仿真: Diffusion Enabled = {enable_diffusion}")
+def run_simulation(method='baseline'):
+    print(f"\n>>> 开始仿真: Method = {method}")
     print(f"    预热轮数: {args.warmup_rounds}, 掉队概率: {args.straggler_prob}")
 
     # 1. 准备数据
@@ -53,9 +53,10 @@ def run_simulation(enable_diffusion=False):
         global_weights = global_model.state_dict()
         edge_grads = []
 
-        # Tier-2 聚合 (包含扩散预测)
+        # Tier-2 聚合 (支持 baseline, dmfl, salf)
         for edge_server in edge_servers:
-            agg_grad = edge_server.aggregate(global_weights, enable_diffusion)
+            # 传入 method 和 global_model (SALF 需要 global_model 获取网络层结构进行梯度截断)
+            agg_grad = edge_server.aggregate(global_weights, method=method, global_model=global_model)
             if agg_grad is not None:
                 edge_grads.append(agg_grad)
 
@@ -71,7 +72,7 @@ def run_simulation(enable_diffusion=False):
         # 测试
         acc = test_model(global_model, test_data)
         acc_history.append(acc)
-        status = "Warmup" if epoch < args.warmup_rounds and enable_diffusion else "Active"
+        status = "Warmup" if epoch < args.warmup_rounds and method == 'dmfl' else "Active"
         print(f"Round {epoch + 1:02d}/{args.num_global_rounds} [{status}] | Accuracy: {acc:.2f}%")
 
     return acc_history
@@ -79,21 +80,23 @@ def run_simulation(enable_diffusion=False):
 
 if __name__ == '__main__':
     # 运行对比实验
-    acc_no_diff = run_simulation(enable_diffusion=False)
-    acc_with_diff = run_simulation(enable_diffusion=True)
+    acc_baseline = run_simulation(method='baseline')
+    acc_salf = run_simulation(method='salf')
+    acc_dmfl = run_simulation(method='dmfl')
 
     # 绘图
     plt.figure(figsize=(10, 6))
-    plt.plot(range(1, args.num_global_rounds + 1), acc_no_diff, 'r--o', label=f'Baseline (Drop Stragglers, Non-IID)')
-    plt.plot(range(1, args.num_global_rounds + 1), acc_with_diff, 'b-s', label=f'Proposed (Diffusion Compensation)')
+    plt.plot(range(1, args.num_global_rounds + 1), acc_baseline, 'r--o', label=f'Baseline (Drop Stragglers)')
+    plt.plot(range(1, args.num_global_rounds + 1), acc_salf, 'g-^', label=f'SALF (Layer-wise Update)')
+    plt.plot(range(1, args.num_global_rounds + 1), acc_dmfl, 'b-s', label=f'DMFL (Diffusion Compensation)')
 
     # 绘制预热分界线
     if args.warmup_rounds > 0:
-        plt.axvline(x=args.warmup_rounds, color='green', linestyle=':', label='Warm-up End')
+        plt.axvline(x=args.warmup_rounds, color='gray', linestyle=':', label='Warm-up End (DMFL)')
 
     plt.xlabel('Global Communication Rounds')
     plt.ylabel('Test Accuracy (%)')
-    plt.title(f'6G 3-Tier FL: Diffusion Compensation vs Drop\n(Non-IID, Straggler Prob: {args.straggler_prob})')
+    plt.title(f'6G 3-Tier FL: Baseline vs SALF vs DMFL\n(Non-IID, Straggler Prob: {args.straggler_prob})')
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
