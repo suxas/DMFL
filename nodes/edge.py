@@ -4,6 +4,7 @@ import random
 import numpy as np
 from config import args
 from models.diffusion import GradientDiffusion
+from SALF import get_salf_partial_grad  # 导入 SALF 算法
 
 
 class EdgeServer:
@@ -21,25 +22,24 @@ class EdgeServer:
             timesteps=args.diff_timesteps
         ).to(args.device)
 
-        #SGD优化器
+        # SGD优化器
         self.diff_optimizer = optim.SGD(
             self.diffusion.parameters(),
             lr=args.diff_lr,
-            momentum=0.9,  # 推荐加入动量
-            weight_decay=5e-4  # SGD通常配合一定的权重衰减防止过拟合
+            momentum = args.momentum,  # 推荐加入动量
+            weight_decay=5e-4  # 权重衰减防止过拟合
         )
-
-        # 历史梯度
         self.historical_grads = {
             i: torch.zeros(input_dim).to(args.device)
             for i in range(len(assigned_clients))
         }
         self.current_round = 0
 
-    def aggregate(self, global_weights, enable_diffusion=False):
+    def aggregate(self, global_weights, method='baseline', global_model=None):
         valid_grads = []
         self.current_round += 1
 
+        enable_diffusion = (method == 'dmfl')
         is_warmup = self.current_round <= args.warmup_rounds
 
         for local_idx, client in enumerate(self.clients):
@@ -72,7 +72,18 @@ class EdgeServer:
 
             else:
                 # --- 掉队处理 ---
-                if enable_diffusion and not is_warmup:
+                if method == 'salf':
+                    # --- SALF 补偿策略 ---
+                    # 模拟 Straggler 进行了部分训练。获得全量梯度后，截断前面的层保留后面层
+                    full_grad = client.train(global_weights)
+                    partial_grad = get_salf_partial_grad(global_model, full_grad)
+                    valid_grads.append(partial_grad)
+
+                    # 顺便更新历史梯度(为保持逻辑一致)
+                    self.historical_grads[local_idx] = full_grad.detach().clone()
+
+                elif enable_diffusion and not is_warmup:
+                    # --- DMFL 补偿策略 ---
                     # 1. 取出历史梯度 (Base)
                     base_grad = self.historical_grads[local_idx].clone()
 
