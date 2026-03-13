@@ -62,14 +62,21 @@ class GradientDiffusion(nn.Module):
     def train_step(self, target_grad, condition_grad):
         """训练扩散模型"""
         self.train()
-        # 随机采样时间步
-        t = torch.randint(0, self.timesteps, (1,), device=args.device).long()
+
+        # 1. 动态获取当前 batch 的大小
+        batch_size = target_grad.shape[0]
+
+        # 2. 为 batch 中的每个样本独立采样一个时间步，大小变为 (batch_size,)
+        t = torch.randint(0, self.timesteps, (batch_size,), device=args.device).long()
         noise = torch.randn_like(target_grad)
 
         # Forward Process
         x_start = target_grad
-        sqrt_alpha = self.sqrt_alphas_cumprod[t]
-        sqrt_one_minus_alpha = self.sqrt_one_minus_alphas_cumprod[t]
+
+        # 3. 提取对应时间步的系数，并增加一个维度 (变成 [batch_size, 1]) 以便与 [batch_size, param_dim] 相乘
+        sqrt_alpha = self.sqrt_alphas_cumprod[t].unsqueeze(1)
+        sqrt_one_minus_alpha = self.sqrt_one_minus_alphas_cumprod[t].unsqueeze(1)
+
         x_t = sqrt_alpha * x_start + sqrt_one_minus_alpha * noise
 
         # Predict Noise
