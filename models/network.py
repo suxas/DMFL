@@ -8,7 +8,6 @@ class SimpleCNN(nn.Module):
         super(SimpleCNN, self).__init__()
         # SALF 针对 MNIST 的参数设置:
         # kernel_size = 5, intemidiate_size_1 = 6, intemidiate_size_2 = 50
-
         self.intemidiate_size_1 = 6
         self.data_size = 28  # MNIST 原始图像大小为 28x28
 
