@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Subset
 import copy
+import random
 from config import args
 from utils import flatten_params
 
@@ -12,6 +13,15 @@ class LocalClient:
         self.ldr_train = DataLoader(Subset(dataset, list(idxs)), batch_size=args.batch_size, shuffle=True)
         self.model = copy.deepcopy(model)
         self.dataset_len = len(idxs)
+        self.f_cpu = random.uniform(args.f_cpu_min, args.f_cpu_max)
+
+    def simulate_physical_conditions(self, param_dim):
+        """仅返回影响状态判断的时间参数，剔除多余功耗数据"""
+        rate = random.uniform(1e6, 5e6)
+        t_up = (param_dim * 32) / rate
+        t_train = (args.num_local_epochs * args.cycles_per_sample * self.dataset_len) / self.f_cpu
+
+        return t_train, t_up
 
     def train(self, global_weights):
         self.model.load_state_dict(global_weights)
@@ -20,18 +30,16 @@ class LocalClient:
 
         initial_params = flatten_params(self.model).detach().clone()
 
-        # 本地训练
-        for epoch in range(args.num_local_epochs):
-            for batch_idx, (images, labels) in enumerate(self.ldr_train):
+        for _ in range(args.num_local_epochs):
+            for images, labels in self.ldr_train:
                 images, labels = images.to(args.device), labels.to(args.device)
                 optimizer.zero_grad()
-                output = self.model(images)
-                loss = nn.CrossEntropyLoss()(output, labels)
+                loss = nn.CrossEntropyLoss()(self.model(images), labels)
                 loss.backward()
                 optimizer.step()
 
-        final_params = flatten_params(self.model).detach().clone()
+        grad_vec = initial_params - flatten_params(self.model).detach().clone()
 
-        # 返回梯度向量 (W_old - W_new)
-        grad_vec = initial_params - final_params
-        return grad_vec
+        # 附加信道噪声
+        noise_std = random.uniform(0.5, 1.5) * getattr(args, 'noise_scale', 0.02)
+        return grad_vec + torch.randn_like(grad_vec) * noise_std
