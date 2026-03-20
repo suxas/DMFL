@@ -1,115 +1,132 @@
-import sys
 import torch
+import sys
 import numpy as np
 import matplotlib.pyplot as plt
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+
 from config import args
 from dataset import get_mnist_data, split_data
 from models.network import SimpleCNN
-from utils import flatten_params, unflatten_params, evaluate_model
+from utils import flatten_params, unflatten_params
 from nodes.client import LocalClient
+from nodes.edge import EdgeServer
 
 
 def get_salf_partial_grad(model, full_grad_vec):
-    """
-    SALF 截断逻辑：模拟 straggler 仅上传部分深层网络梯度。
-    """
+    """SALF 算法核心逻辑"""
     param_sizes = [p.numel() for p in model.parameters()]
     num_of_layers = len(param_sizes)
-
-    # 随机选择从后往前上传的层数
     up_to_layer = np.random.randint(1, num_of_layers + 1)
     layers_to_zero = num_of_layers - up_to_layer
     num_zeros = sum(param_sizes[:layers_to_zero])
 
     salf_grad_vec = full_grad_vec.clone()
     if num_zeros > 0:
-        # 将前端未计算完/未传完的层对应的含噪梯度直接置0
         salf_grad_vec[:num_zeros] = 0.0
-
     return salf_grad_vec
 
 
+def evaluate_model(model, dataset):
+    model.eval()
+    loader = DataLoader(dataset, batch_size=args.batch_size)
+    correct, total_loss = 0, 0.0
+    with torch.no_grad():
+        for data, target in loader:
+            data, target = data.to(args.device), target.to(args.device)
+            output = model(data)
+            total_loss += F.cross_entropy(output, target, reduction='sum').item()
+            pred = output.argmax(dim=1, keepdim=True)
+            correct += pred.eq(target.view_as(pred)).sum().item()
+    return 100. * correct / len(dataset), total_loss / len(dataset)
+
+
 def run_salf():
-    print(f"\n>>> [2/3] 正在运行 SALF (掉队率: {args.target_straggler_rate * 100}%)")
+    print("\n>>> 正在进行仿真: Method = salf")
     train_data, test_data = get_mnist_data()
     user_groups = split_data(train_data, args.num_users)
 
     global_model = SimpleCNN().to(args.device)
     param_dim = flatten_params(global_model).numel()
 
-    train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=False)
-    test_loader = DataLoader(test_data, batch_size=args.batch_size, shuffle=False)
     clients = [LocalClient(train_data, user_groups[i], global_model) for i in range(args.num_users)]
+    edge_servers = []
+    users_per_edge = args.num_users // args.num_edge_servers
+    for i in range(args.num_edge_servers):
+        edge_servers.append(EdgeServer(i, clients[i * users_per_edge: (i + 1) * users_per_edge], param_dim))
 
-    history = {'train_acc': [], 'train_loss': [], 'val_acc': [], 'val_loss': []}
-    pbar = tqdm(range(args.num_global_rounds), desc="Training [SALF]", file=sys.stdout, colour='green')
+    t_acc_hist, t_loss_hist, v_acc_hist, v_loss_hist = [], [], [], []
+    pbar = tqdm(range(args.num_global_rounds), desc="Training [salf]", ncols=100, file=sys.stdout)
 
     for epoch in pbar:
         global_model.train()
         global_weights = global_model.state_dict()
         edge_grads = []
 
-        users_per_edge = args.num_users // args.num_edge_servers
-        for i in range(args.num_edge_servers):
-            assigned_clients = clients[i * users_per_edge: (i + 1) * users_per_edge]
-
-            # --- 根据目标掉队率设置动态时间窗口 ---
-            client_times = [c.simulate_physical_time(param_dim) for c in assigned_clients]
-            total_times = [c[0] + c[1] for c in client_times]
-
-            success_rate = 1.0 - args.target_straggler_rate
-            K_min = max(1, int(len(assigned_clients) * success_rate))
-            dynamic_t_win = min(args.t_deadline, sorted(total_times)[K_min - 1])
-
+        for edge_server in edge_servers:
             valid_grads = []
-            for idx, client in enumerate(assigned_clients):
-                t_total = total_times[idx]
 
-                # 附加通信噪声
-                full_grad = client.train(global_weights, add_noise=True)
+            # --- SALF 的聚合与掉队处理 ---
+            client_conditions = [client.simulate_physical_conditions(param_dim) for client in edge_server.clients]
+            total_times = [c[0] + c[1] for c in client_conditions]
 
-                # 若耗时超过时间窗，触发 SALF 截断
-                if t_total > dynamic_t_win:
+            K_min = max(2, int(len(edge_server.clients) * 0.5))
+            sorted_times = sorted(total_times)
+            dynamic_t_win = min(args.t_deadline, sorted_times[K_min - 1])
+
+            for local_idx, client in enumerate(edge_server.clients):
+                t_train, t_up, e_comp, e_comm = client_conditions[local_idx]
+                t_total = t_train + t_up
+                is_straggler = (t_total > dynamic_t_win)
+
+                if not is_straggler:
+                    grad = client.train(global_weights)
+                    valid_grads.append(grad)
+                else:
+                    # SALF 将允许计算部分梯度
+                    full_grad = client.train(global_weights)
                     partial_grad = get_salf_partial_grad(global_model, full_grad)
                     valid_grads.append(partial_grad)
-                else:
-                    valid_grads.append(full_grad)
 
-            if valid_grads:
-                edge_grads.append(torch.stack(valid_grads).mean(dim=0))
+            agg_grad = torch.stack(valid_grads).mean(dim=0) if len(valid_grads) > 0 else None
+
+            if agg_grad is not None:
+                edge_grads.append(agg_grad)
 
         if edge_grads:
             global_grad = torch.stack(edge_grads).mean(dim=0)
-            curr_params = flatten_params(global_model)
-            unflatten_params(global_model, curr_params - global_grad)
+            new_params = flatten_params(global_model) - global_grad
+            unflatten_params(global_model, new_params)
 
-        train_acc, train_loss = evaluate_model(global_model, train_loader, args.device)
-        val_acc, val_loss = evaluate_model(global_model, test_loader, args.device)
-        history['train_acc'].append(train_acc);
-        history['train_loss'].append(train_loss)
-        history['val_acc'].append(val_acc);
-        history['val_loss'].append(val_loss)
-        pbar.set_postfix({'Val Acc': f"{val_acc:.2f}%"})
+        train_acc, train_loss = evaluate_model(global_model, train_data)
+        val_acc, val_loss = evaluate_model(global_model, test_data)
 
-    return history
+        t_acc_hist.append(train_acc)
+        t_loss_hist.append(train_loss)
+        v_acc_hist.append(val_acc)
+        v_loss_hist.append(val_loss)
+        pbar.set_postfix({'Val Acc': f"{val_acc:.2f}%", 'Val Loss': f"{val_loss:.4f}"})
+
+    return t_acc_hist, t_loss_hist, v_acc_hist, v_loss_hist
 
 
 if __name__ == '__main__':
-    history = run_salf()
+    t_acc, t_loss, v_acc, v_loss = run_salf()
     epochs = range(1, args.num_global_rounds + 1)
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-    axes[0].plot(epochs, history['train_acc'], 'b-', label='Train Acc')
-    axes[0].plot(epochs, history['val_acc'], 'r--', label='Val Acc')
-    axes[0].set_title('SALF Accuracy (Train vs Val)')
-    axes[0].legend();
+    axes[0].plot(epochs, t_acc, 'b--o', label='Train Accuracy')
+    axes[0].plot(epochs, v_acc, 'r-^', label='Validation Accuracy')
+    axes[0].set_title('SALF: Accuracy')
+    axes[0].legend()
     axes[0].grid(True)
 
-    axes[1].plot(epochs, history['train_loss'], 'b-', label='Train Loss')
-    axes[1].plot(epochs, history['val_loss'], 'r--', label='Val Loss')
-    axes[1].set_title('SALF Loss (Train vs Val)')
-    axes[1].legend();
+    axes[1].plot(epochs, t_loss, 'b--o', label='Train Loss')
+    axes[1].plot(epochs, v_loss, 'r-^', label='Validation Loss')
+    axes[1].set_title('SALF: Loss')
+    axes[1].legend()
     axes[1].grid(True)
+
+    plt.tight_layout()
     plt.show()

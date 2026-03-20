@@ -15,8 +15,8 @@ class Config:
 
     # --- 物理通信与计算参数 ---
     bandwidth = 1e6
-    p_ue_max = 0.2  # UE功率参数
-    kappa = 1e-28  # 功率系数
+    p_ue_max = 0.2  # UE功率参数 stc
+    kappa = 1e-28  # 功率系数   stc
     f_cpu_min = 1e9
     f_cpu_max = 2e9
     cycles_per_sample = 2e4
