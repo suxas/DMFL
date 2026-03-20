@@ -27,7 +27,7 @@ def evaluate_model(model, dataset):
     return 100. * correct / len(dataset), total_loss / len(dataset)
 
 
-def run_fedavg():
+def run_fedavg(skip_train_eval=False):
     print("\n>>> 正在进行仿真: Method = fedavg")
     train_data, test_data = get_mnist_data()
     user_groups = split_data(train_data, args.num_users)
@@ -61,7 +61,7 @@ def run_fedavg():
             dynamic_t_win = min(args.t_deadline, sorted_times[K_min - 1])
 
             for local_idx, client in enumerate(edge_server.clients):
-                t_train, t_up, e_comp, e_comm = client_conditions[local_idx]
+                t_train, t_up = client_conditions[local_idx][:2]
                 t_total = t_train + t_up
                 is_straggler = (t_total > dynamic_t_win)
 
@@ -78,20 +78,27 @@ def run_fedavg():
             new_params = flatten_params(global_model) - global_grad
             unflatten_params(global_model, new_params)
 
-        train_acc, train_loss = evaluate_model(global_model, train_data)
+        # 验证集评估
         val_acc, val_loss = evaluate_model(global_model, test_data)
-
-        t_acc_hist.append(train_acc)
-        t_loss_hist.append(train_loss)
         v_acc_hist.append(val_acc)
         v_loss_hist.append(val_loss)
+
+        # 训练集评估 (受 skip_train_eval 控制)
+        if not skip_train_eval:
+            train_acc, train_loss = evaluate_model(global_model, train_data)
+            t_acc_hist.append(train_acc)
+            t_loss_hist.append(train_loss)
+        else:
+            t_acc_hist.append(0.0)
+            t_loss_hist.append(0.0)
+
         pbar.set_postfix({'Val Acc': f"{val_acc:.2f}%", 'Val Loss': f"{val_loss:.4f}"})
 
     return t_acc_hist, t_loss_hist, v_acc_hist, v_loss_hist
 
 
 if __name__ == '__main__':
-    t_acc, t_loss, v_acc, v_loss = run_fedavg()
+    t_acc, t_loss, v_acc, v_loss = run_fedavg(skip_train_eval=False)
     epochs = range(1, args.num_global_rounds + 1)
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))

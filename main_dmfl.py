@@ -14,29 +14,22 @@ from utils import flatten_params, unflatten_params
 from nodes.client import LocalClient
 from nodes.edge import EdgeServer
 
-class DMFLEdgeState:
+
+class EdgeState:
     """管理属于每个边缘基站的 DMFL 扩散模型相关状态"""
-    def __init__(self, num_clients, input_dim):
-        self.diffusion_dim = 510
-        self.diffusion = GradientDiffusion(
-            param_dim=self.diffusion_dim,
-            hidden_dim=args.diff_hidden_dim,
-            timesteps=args.diff_timesteps
-        ).to(args.device)
 
-        self.diff_optimizer = optim.SGD(
-            self.diffusion.parameters(),
-            lr=args.diff_lr,
-            momentum=args.momentum,
-            weight_decay=5e-4
-        )
-        self.historical_grads = {i: torch.zeros(input_dim).to(args.device) for i in range(num_clients)}
-        self.replay_buffer_history = []
-        self.replay_buffer_target = []
-        self.w_hist = 5
-        self.max_buffer_size = num_clients * self.w_hist
+    def __init__(self, num_clients, param_dim):
+        self.diff_dim = 510
+        self.diffusion = GradientDiffusion(self.diff_dim, args.diff_hidden_dim, args.diff_timesteps).to(args.device)
+        self.optimizer = optim.SGD(self.diffusion.parameters(), lr=args.diff_lr, momentum=args.momentum,
+                                   weight_decay=5e-4)
 
-def evaluate_model(model, dataset):
+        self.hist_grads = {i: torch.zeros(param_dim).to(args.device) for i in range(num_clients)}
+        self.buf_hist, self.buf_targ = [], []
+        self.max_buf = num_clients * 5
+
+
+def evaluate(model, dataset):
     model.eval()
     loader = DataLoader(dataset, batch_size=args.batch_size)
     correct, total_loss = 0, 0.0
@@ -49,8 +42,9 @@ def evaluate_model(model, dataset):
             correct += pred.eq(target.view_as(pred)).sum().item()
     return 100. * correct / len(dataset), total_loss / len(dataset)
 
-def run_dmfl():
-    print("\n>>> 正在进行仿真: Method = dmfl")
+
+def run_dmfl(skip_train_eval=False):
+    print("\n>>> 正在进行仿真: Method = DMFL")
     train_data, test_data = get_mnist_data()
     user_groups = split_data(train_data, args.num_users)
 
@@ -59,115 +53,94 @@ def run_dmfl():
 
     clients = [LocalClient(train_data, user_groups[i], global_model) for i in range(args.num_users)]
     edge_servers = []
-    users_per_edge = args.num_users // args.num_edge_servers
+    u_per_edge = args.num_users // args.num_edge_servers
     for i in range(args.num_edge_servers):
-        edge_servers.append(EdgeServer(i, clients[i * users_per_edge: (i + 1) * users_per_edge], param_dim))
+        edge_servers.append(EdgeServer(i, clients[i * u_per_edge: (i + 1) * u_per_edge], param_dim))
 
-    # 初始化每个基站的 DMFL 状态 (脱离了 edge.py)
-    dmfl_states = {server.id: DMFLEdgeState(len(server.clients), param_dim) for server in edge_servers}
+    states = {s.id: EdgeState(len(s.clients), param_dim) for s in edge_servers}
+    t_acc, t_loss, v_acc, v_loss = [], [], [], []
 
-    t_acc_hist, t_loss_hist, v_acc_hist, v_loss_hist = [], [], [], []
-    pbar = tqdm(range(args.num_global_rounds), desc="Training [dmfl]", ncols=100, file=sys.stdout)
+    pbar = tqdm(range(1, args.num_global_rounds + 1), desc="Training [DMFL]", ncols=100, file=sys.stdout)
 
     for epoch in pbar:
-        current_round = epoch + 1
-        is_warmup = current_round <= args.warmup_rounds
-
         global_model.train()
         global_weights = global_model.state_dict()
         edge_grads = []
 
-        for edge_server in edge_servers:
-            state = dmfl_states[edge_server.id]
+        for server in edge_servers:
+            state = states[server.id]
             valid_grads = []
 
-            # --- DMFL 聚合与训练扩散模型 ---
-            client_conditions = [client.simulate_physical_conditions(param_dim) for client in edge_server.clients]
-            total_times = [c[0] + c[1] for c in client_conditions]
+            times = [sum(c.simulate_physical_conditions(param_dim)[:2]) for c in server.clients]
+            t_win = min(args.t_deadline, sorted(times)[max(2, int(len(server.clients) * 0.5)) - 1])
 
-            K_min = max(2, int(len(edge_server.clients) * 0.5))
-            sorted_times = sorted(total_times)
-            dynamic_t_win = min(args.t_deadline, sorted_times[K_min - 1])
-
-            for local_idx, client in enumerate(edge_server.clients):
-                t_train, t_up, e_comp, e_comm = client_conditions[local_idx]
-                t_total = t_train + t_up
-                is_straggler = (t_total > dynamic_t_win)
-
-                if not is_straggler:
+            for i, client in enumerate(server.clients):
+                if times[i] <= t_win:
                     grad = client.train(global_weights)
                     valid_grads.append(grad)
 
-                    # 提取特征存入池中
-                    if torch.norm(state.historical_grads[local_idx]) > 0:
-                        current_head = grad[-state.diffusion_dim:]
-                        history_head = state.historical_grads[local_idx][-state.diffusion_dim:]
-                        target_delta = current_head - history_head
+                    if torch.norm(state.hist_grads[i]) > 0:
+                        head_curr, head_hist = grad[-state.diff_dim:], state.hist_grads[i][-state.diff_dim:]
+                        state.buf_hist.append(head_hist.detach().clone())
+                        state.buf_targ.append((head_curr - head_hist).detach().clone())
+                    state.hist_grads[i] = grad.detach().clone()
 
-                        state.replay_buffer_history.append(history_head.detach().clone())
-                        state.replay_buffer_target.append(target_delta.detach().clone())
+                elif epoch > args.warmup_rounds:
+                    base_grad = state.hist_grads[i].clone()
+                    if torch.norm(base_grad) > 0:
+                        head_hist = base_grad[-state.diff_dim:].unsqueeze(0)
+                        delta = state.diffusion.generate(head_hist).squeeze(0)
 
-                    state.historical_grads[local_idx] = grad.detach().clone()
+                        norm_d, norm_b = torch.norm(delta), torch.norm(head_hist)
+                        if norm_d > norm_b:
+                            delta = delta * (norm_b / (norm_d + 1e-6)) * 0.5
 
-                else:
-                    if not is_warmup:
-                        # 扩散模型预测掉队梯度
-                        base_grad = state.historical_grads[local_idx].clone()
-                        if torch.norm(base_grad) > 0:
-                            history_head = base_grad[-state.diffusion_dim:].unsqueeze(0)
-                            predicted_delta = state.diffusion.generate(history_head).squeeze(0)
+                        base_grad[-state.diff_dim:] += delta
+                        valid_grads.append(base_grad)
 
-                            delta_norm = torch.norm(predicted_delta)
-                            base_norm = torch.norm(history_head)
-                            if delta_norm > base_norm:
-                                predicted_delta = predicted_delta * (base_norm / (delta_norm + 1e-6)) * 0.5
+            if state.buf_hist:
+                state.buf_hist = state.buf_hist[-state.max_buf:]
+                state.buf_targ = state.buf_targ[-state.max_buf:]
 
-                            base_grad[-state.diffusion_dim:] += predicted_delta
-                            valid_grads.append(base_grad)
-
-            # 更新当前基站的扩散模型
-            if len(state.replay_buffer_history) > 0:
-                if len(state.replay_buffer_history) > state.max_buffer_size:
-                    state.replay_buffer_history = state.replay_buffer_history[-state.max_buffer_size:]
-                    state.replay_buffer_target = state.replay_buffer_target[-state.max_buffer_size:]
-
-                hist_tensor = torch.stack(state.replay_buffer_history)
-                targ_tensor = torch.stack(state.replay_buffer_target)
-                dataset = TensorDataset(targ_tensor, hist_tensor)
-                dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
+                dataset = TensorDataset(torch.stack(state.buf_targ), torch.stack(state.buf_hist))
+                loader = DataLoader(dataset, batch_size=32, shuffle=True)
 
                 state.diffusion.train()
-                for _ in range(5):  # e_diff = 5
-                    for batch_targ, batch_hist in dataloader:
-                        loss = state.diffusion.train_step(batch_targ, batch_hist)
-                        state.diff_optimizer.zero_grad()
+                for _ in range(5):
+                    for targ, hist in loader:
+                        loss = state.diffusion.train_step(targ, hist)
+                        state.optimizer.zero_grad()
                         loss.backward()
-                        state.diff_optimizer.step()
+                        state.optimizer.step()
 
-            agg_grad = torch.stack(valid_grads).mean(dim=0) if len(valid_grads) > 0 else None
-
-            if agg_grad is not None:
-                edge_grads.append(agg_grad)
+            if valid_grads:
+                edge_grads.append(torch.stack(valid_grads).mean(dim=0))
 
         if edge_grads:
             global_grad = torch.stack(edge_grads).mean(dim=0)
-            new_params = flatten_params(global_model) - global_grad
-            unflatten_params(global_model, new_params)
+            unflatten_params(global_model, flatten_params(global_model) - global_grad)
 
-        train_acc, train_loss = evaluate_model(global_model, train_data)
-        val_acc, val_loss = evaluate_model(global_model, test_data)
+        # 验证集评估
+        acc_v, loss_v = evaluate(global_model, test_data)
+        v_acc.append(acc_v)
+        v_loss.append(loss_v)
 
-        t_acc_hist.append(train_acc)
-        t_loss_hist.append(train_loss)
-        v_acc_hist.append(val_acc)
-        v_loss_hist.append(val_loss)
-        pbar.set_postfix({'Val Acc': f"{val_acc:.2f}%", 'Val Loss': f"{val_loss:.4f}"})
+        # 训练集评估 (受 skip_train_eval 控制)
+        if not skip_train_eval:
+            acc_t, loss_t = evaluate(global_model, train_data)
+            t_acc.append(acc_t)
+            t_loss.append(loss_t)
+        else:
+            t_acc.append(0.0)
+            t_loss.append(0.0)
 
-    return t_acc_hist, t_loss_hist, v_acc_hist, v_loss_hist
+        pbar.set_postfix({'Val Acc': f"{acc_v:.2f}%", 'Val Loss': f"{loss_v:.4f}"})
+
+    return t_acc, t_loss, v_acc, v_loss
 
 
 if __name__ == '__main__':
-    t_acc, t_loss, v_acc, v_loss = run_dmfl()
+    t_acc, t_loss, v_acc, v_loss = run_dmfl(skip_train_eval=False)
     epochs = range(1, args.num_global_rounds + 1)
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
