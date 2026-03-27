@@ -7,15 +7,13 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from config import args
-from dataset import get_mnist_data, split_data
-from models.network import SimpleCNN
+from dataset import get_cifar10_data, split_cifar10_data
+from models.network import CNNCifar
 from utils import flatten_params, unflatten_params
 from nodes.client import LocalClient
 from nodes.edge import EdgeServer
 
-
 def get_salf_partial_grad(model, full_grad_vec):
-    """SALF 算法核心逻辑"""
     param_sizes = [p.numel() for p in model.parameters()]
     num_of_layers = len(param_sizes)
     up_to_layer = np.random.randint(1, num_of_layers + 1)
@@ -26,7 +24,6 @@ def get_salf_partial_grad(model, full_grad_vec):
     if num_zeros > 0:
         salf_grad_vec[:num_zeros] = 0.0
     return salf_grad_vec
-
 
 def evaluate_model(model, dataset):
     model.eval()
@@ -41,13 +38,12 @@ def evaluate_model(model, dataset):
             correct += pred.eq(target.view_as(pred)).sum().item()
     return 100. * correct / len(dataset), total_loss / len(dataset)
 
-
 def run_salf(skip_train_eval=False):
-    print("\n>>> 正在进行仿真: Method = salf")
-    train_data, test_data = get_mnist_data()
-    user_groups = split_data(train_data, args.num_users)
+    print("\n>>> 正在进行仿真: Method = SALF (CIFAR-10)")
+    train_data, test_data = get_cifar10_data()
+    user_groups = split_cifar10_data(train_data, args.num_users)
 
-    global_model = SimpleCNN().to(args.device)
+    global_model = CNNCifar().to(args.device)
     param_dim = flatten_params(global_model).numel()
 
     clients = [LocalClient(train_data, user_groups[i], global_model) for i in range(args.num_users)]
@@ -57,7 +53,7 @@ def run_salf(skip_train_eval=False):
         edge_servers.append(EdgeServer(i, clients[i * users_per_edge: (i + 1) * users_per_edge], param_dim))
 
     t_acc_hist, t_loss_hist, v_acc_hist, v_loss_hist = [], [], [], []
-    pbar = tqdm(range(args.num_global_rounds), desc="Training [salf]", ncols=100, file=sys.stdout)
+    pbar = tqdm(range(1, args.num_global_rounds + 1), desc="Training [SALF]", ncols=100, file=sys.stdout)
 
     for epoch in pbar:
         global_model.train()
@@ -67,7 +63,6 @@ def run_salf(skip_train_eval=False):
         for edge_server in edge_servers:
             valid_grads = []
 
-            # --- SALF 的聚合与掉队处理 ---
             client_conditions = [client.simulate_physical_conditions(param_dim) for client in edge_server.clients]
             total_times = [c[0] + c[1] for c in client_conditions]
 
@@ -77,34 +72,23 @@ def run_salf(skip_train_eval=False):
 
             for local_idx, client in enumerate(edge_server.clients):
                 t_train, t_up = client_conditions[local_idx][:2]
-                t_total = t_train + t_up
-                is_straggler = (t_total > dynamic_t_win)
-
-                if not is_straggler:
-                    grad = client.train(global_weights)
-                    valid_grads.append(grad)
+                if (t_train + t_up) <= dynamic_t_win:
+                    valid_grads.append(client.train(global_weights))
                 else:
-                    # SALF 将允许计算部分梯度
                     full_grad = client.train(global_weights)
-                    partial_grad = get_salf_partial_grad(global_model, full_grad)
-                    valid_grads.append(partial_grad)
+                    valid_grads.append(get_salf_partial_grad(global_model, full_grad))
 
-            agg_grad = torch.stack(valid_grads).mean(dim=0) if len(valid_grads) > 0 else None
-
-            if agg_grad is not None:
-                edge_grads.append(agg_grad)
+            if valid_grads:
+                edge_grads.append(torch.stack(valid_grads).mean(dim=0))
 
         if edge_grads:
             global_grad = torch.stack(edge_grads).mean(dim=0)
-            new_params = flatten_params(global_model) - global_grad
-            unflatten_params(global_model, new_params)
+            unflatten_params(global_model, flatten_params(global_model) - global_grad)
 
-        # 验证集评估
         val_acc, val_loss = evaluate_model(global_model, test_data)
         v_acc_hist.append(val_acc)
         v_loss_hist.append(val_loss)
 
-        # 训练集评估 (受 skip_train_eval 控制)
         if not skip_train_eval:
             train_acc, train_loss = evaluate_model(global_model, train_data)
             t_acc_hist.append(train_acc)
@@ -116,24 +100,3 @@ def run_salf(skip_train_eval=False):
         pbar.set_postfix({'Val Acc': f"{val_acc:.2f}%", 'Val Loss': f"{val_loss:.4f}"})
 
     return t_acc_hist, t_loss_hist, v_acc_hist, v_loss_hist
-
-
-if __name__ == '__main__':
-    t_acc, t_loss, v_acc, v_loss = run_salf(skip_train_eval=False)
-    epochs = range(1, args.num_global_rounds + 1)
-
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-    axes[0].plot(epochs, t_acc, 'b--o', label='Train Accuracy')
-    axes[0].plot(epochs, v_acc, 'r-^', label='Validation Accuracy')
-    axes[0].set_title('SALF: Accuracy')
-    axes[0].legend()
-    axes[0].grid(True)
-
-    axes[1].plot(epochs, t_loss, 'b--o', label='Train Loss')
-    axes[1].plot(epochs, v_loss, 'r-^', label='Validation Loss')
-    axes[1].set_title('SALF: Loss')
-    axes[1].legend()
-    axes[1].grid(True)
-
-    plt.tight_layout()
-    plt.show()

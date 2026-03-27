@@ -7,7 +7,7 @@ class Config:
     # --- 环境与联邦学习设置 ---
     num_users = 30
     num_edge_servers = 3
-    num_global_rounds = 30
+    num_global_rounds = 100
     num_local_epochs = 3
     batch_size = 16
     lr = 0.01
@@ -30,7 +30,7 @@ class Config:
     diff_timesteps = 20
     diff_hidden_dim = 64
     diff_lr = 0.005
-    warmup_rounds = 5
+    warmup_rounds = 15
 
     data_path = './data'
 

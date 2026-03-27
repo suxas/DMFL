@@ -7,8 +7,8 @@ from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
 from config import args
-from dataset import get_mnist_data, split_data
-from models.network import SimpleCNN
+from dataset import get_cifar10_data, split_cifar10_data
+from models.network import CNNCifar
 from models.diffusion import GradientDiffusion
 from utils import flatten_params, unflatten_params
 from nodes.client import LocalClient
@@ -16,10 +16,9 @@ from nodes.edge import EdgeServer
 
 
 class EdgeState:
-    """管理属于每个边缘基站的 DMFL 扩散模型相关状态"""
-
     def __init__(self, num_clients, param_dim):
-        self.diff_dim = 510
+        # CIFAR-10 网络 CNNCifar 最后一层 (fc3) 参数量: 84 * 10 + 10 = 850
+        self.diff_dim = 850
         self.diffusion = GradientDiffusion(self.diff_dim, args.diff_hidden_dim, args.diff_timesteps).to(args.device)
         self.optimizer = optim.SGD(self.diffusion.parameters(), lr=args.diff_lr, momentum=args.momentum,
                                    weight_decay=5e-4)
@@ -44,11 +43,11 @@ def evaluate(model, dataset):
 
 
 def run_dmfl(skip_train_eval=False):
-    print("\n>>> 正在进行仿真: Method = DMFL")
-    train_data, test_data = get_mnist_data()
-    user_groups = split_data(train_data, args.num_users)
+    print("\n>>> 正在进行仿真: Method = DMFL (CIFAR-10)")
+    train_data, test_data = get_cifar10_data()
+    user_groups = split_cifar10_data(train_data, args.num_users)
 
-    global_model = SimpleCNN().to(args.device)
+    global_model = CNNCifar().to(args.device)
     param_dim = flatten_params(global_model).numel()
 
     clients = [LocalClient(train_data, user_groups[i], global_model) for i in range(args.num_users)]
@@ -120,12 +119,10 @@ def run_dmfl(skip_train_eval=False):
             global_grad = torch.stack(edge_grads).mean(dim=0)
             unflatten_params(global_model, flatten_params(global_model) - global_grad)
 
-        # 验证集评估
         acc_v, loss_v = evaluate(global_model, test_data)
         v_acc.append(acc_v)
         v_loss.append(loss_v)
 
-        # 训练集评估 (受 skip_train_eval 控制)
         if not skip_train_eval:
             acc_t, loss_t = evaluate(global_model, train_data)
             t_acc.append(acc_t)
@@ -137,28 +134,3 @@ def run_dmfl(skip_train_eval=False):
         pbar.set_postfix({'Val Acc': f"{acc_v:.2f}%", 'Val Loss': f"{loss_v:.4f}"})
 
     return t_acc, t_loss, v_acc, v_loss
-
-
-if __name__ == '__main__':
-    t_acc, t_loss, v_acc, v_loss = run_dmfl(skip_train_eval=False)
-    epochs = range(1, args.num_global_rounds + 1)
-
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-    axes[0].plot(epochs, t_acc, 'b--o', label='Train Accuracy')
-    axes[0].plot(epochs, v_acc, 'r-^', label='Validation Accuracy')
-    if args.warmup_rounds > 0:
-        axes[0].axvline(x=args.warmup_rounds, color='gray', linestyle=':', label='Warm-up End')
-    axes[0].set_title('DMFL: Accuracy')
-    axes[0].legend()
-    axes[0].grid(True)
-
-    axes[1].plot(epochs, t_loss, 'b--o', label='Train Loss')
-    axes[1].plot(epochs, v_loss, 'r-^', label='Validation Loss')
-    if args.warmup_rounds > 0:
-        axes[1].axvline(x=args.warmup_rounds, color='gray', linestyle=':', label='Warm-up End')
-    axes[1].set_title('DMFL: Loss')
-    axes[1].legend()
-    axes[1].grid(True)
-
-    plt.tight_layout()
-    plt.show()
