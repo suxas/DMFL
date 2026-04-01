@@ -25,7 +25,7 @@ class EdgeState:
 
         self.hist_grads = {i: torch.zeros(param_dim).to(args.device) for i in range(num_clients)}
         self.buf_hist, self.buf_targ = [], []
-        self.max_buf = num_clients * 5
+        self.max_buf = num_clients * 20 #3.31 经验池加大
 
 
 def evaluate(model, dataset):
@@ -105,7 +105,7 @@ def run_dmfl(skip_train_eval=False):
                 loader = DataLoader(dataset, batch_size=32, shuffle=True)
 
                 state.diffusion.train()
-                for _ in range(5):
+                for _ in range(15): #3.31 5→15
                     for targ, hist in loader:
                         loss = state.diffusion.train_step(targ, hist)
                         state.optimizer.zero_grad()
