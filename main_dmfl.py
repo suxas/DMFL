@@ -7,8 +7,8 @@ from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
 from config import args
-from dataset import get_cifar10_data, split_cifar10_data
-from models.network import CNNCifar
+from dataset import get_dataset, split_data
+from models.network import SimpleCNN, CNNCifar
 from models.diffusion import GradientDiffusion
 from utils import flatten_params, unflatten_params
 from nodes.client import LocalClient
@@ -16,9 +16,9 @@ from nodes.edge import EdgeServer
 
 
 class EdgeState:
-    def __init__(self, num_clients, param_dim):
+    def __init__(self, num_clients, param_dim, diff_dim):
         # CIFAR-10 网络 CNNCifar 最后一层 (fc3) 参数量: 84 * 10 + 10 = 850
-        self.diff_dim = 850
+        self.diff_dim = diff_dim
         self.diffusion = GradientDiffusion(self.diff_dim, args.diff_hidden_dim, args.diff_timesteps).to(args.device)
         self.optimizer = optim.SGD(self.diffusion.parameters(), lr=args.diff_lr, momentum=args.momentum,
                                    weight_decay=5e-4)
@@ -44,10 +44,16 @@ def evaluate(model, dataset):
 
 def run_dmfl(skip_train_eval=False):
     print("\n>>> 正在进行仿真: Method = DMFL (CIFAR-10)")
-    train_data, test_data = get_cifar10_data()
-    user_groups = split_cifar10_data(train_data, args.num_users)
+    train_data, test_data = get_dataset()
+    user_groups = split_data(train_data, args.num_users)
 
-    global_model = CNNCifar().to(args.device)
+    if args.dataset_name == 'cifar10':
+        global_model = CNNCifar().to(args.device)
+        diff_dim = 850
+    else:
+        global_model = SimpleCNN().to(args.device)
+        diff_dim = 510
+
     param_dim = flatten_params(global_model).numel()
 
     clients = [LocalClient(train_data, user_groups[i], global_model) for i in range(args.num_users)]
@@ -56,7 +62,7 @@ def run_dmfl(skip_train_eval=False):
     for i in range(args.num_edge_servers):
         edge_servers.append(EdgeServer(i, clients[i * u_per_edge: (i + 1) * u_per_edge], param_dim))
 
-    states = {s.id: EdgeState(len(s.clients), param_dim) for s in edge_servers}
+    states = {s.id: EdgeState(len(s.clients), param_dim, diff_dim) for s in edge_servers}
     t_acc, t_loss, v_acc, v_loss = [], [], [], []
 
     pbar = tqdm(range(1, args.num_global_rounds + 1), desc="Training [DMFL]", ncols=100, file=sys.stdout)
@@ -105,7 +111,7 @@ def run_dmfl(skip_train_eval=False):
                 loader = DataLoader(dataset, batch_size=32, shuffle=True)
 
                 state.diffusion.train()
-                for _ in range(15): #3.31 5→15
+                for _ in range(5):  # 扩撒模型训练次数
                     for targ, hist in loader:
                         loss = state.diffusion.train_step(targ, hist)
                         state.optimizer.zero_grad()
@@ -134,3 +140,37 @@ def run_dmfl(skip_train_eval=False):
         pbar.set_postfix({'Val Acc': f"{acc_v:.2f}%", 'Val Loss': f"{loss_v:.4f}"})
 
     return t_acc, t_loss, v_acc, v_loss
+
+if __name__ == '__main__':
+    # 独立运行时，默认计算训练集 (skip_train_eval=False)
+    t_acc, t_loss, v_acc, v_loss = run_dmfl(skip_train_eval=False)
+    epochs = range(1, args.num_global_rounds + 1)
+    ms = 2  # 缩小描点体积
+
+    # 绘制独立运行时的 Train vs Validation 对比图
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    # 精度图
+    axes[0].plot(epochs, t_acc, 'b--o', markersize=ms, label='Train Accuracy')
+    axes[0].plot(epochs, v_acc, 'r-^', markersize=ms, label='Validation Accuracy')
+    if args.warmup_rounds > 0:
+        axes[0].axvline(x=args.warmup_rounds, color='gray', linestyle=':', label='Warm-up End')
+    axes[0].set_title(f'DMFL ({args.dataset_name.upper()}): Accuracy')
+    axes[0].set_xlabel('Global Communication Rounds')
+    axes[0].set_ylabel('Accuracy (%)')
+    axes[0].legend()
+    axes[0].grid(True)
+
+    # Loss图
+    axes[1].plot(epochs, t_loss, 'b--o', markersize=ms, label='Train Loss')
+    axes[1].plot(epochs, v_loss, 'r-^', markersize=ms, label='Validation Loss')
+    if args.warmup_rounds > 0:
+        axes[1].axvline(x=args.warmup_rounds, color='gray', linestyle=':', label='Warm-up End')
+    axes[1].set_title(f'DMFL ({args.dataset_name.upper()}): Loss')
+    axes[1].set_xlabel('Global Communication Rounds')
+    axes[1].set_ylabel('Loss')
+    axes[1].legend()
+    axes[1].grid(True)
+
+    plt.tight_layout()
+    plt.show()

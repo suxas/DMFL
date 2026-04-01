@@ -11,34 +11,35 @@ if __name__ == '__main__':
     _, _, v_acc_salf, v_loss_salf = run_salf(skip_train_eval=True)
     _, _, v_acc_dmfl, v_loss_dmfl = run_dmfl(skip_train_eval=True)
 
-    # 绘制三大算法对照图 (对比验证集效果)
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
     epochs = range(1, args.num_global_rounds + 1)
+    ms = 2  # 描点体积
 
-    # 子图1: 验证集精度对比
-    axes[0].plot(epochs, v_acc_base, 'r--o', label='FedAvg')
-    axes[0].plot(epochs, v_acc_salf, 'g-^', label='SALF')
-    axes[0].plot(epochs, v_acc_dmfl, 'b-s', label='DMFL')
+    # ================= 图1: 验证集精度 =================
+    plt.figure(1, figsize=(8, 6))
+    plt.plot(epochs, v_acc_base, 'r--o', markersize=ms, label='FedAvg')
+    plt.plot(epochs, v_acc_salf, 'g-^', markersize=ms, label='SALF')
+    plt.plot(epochs, v_acc_dmfl, 'b-s', markersize=ms, label='DMFL')
     if args.warmup_rounds > 0:
-        axes[0].axvline(x=args.warmup_rounds, color='gray', linestyle=':', label='Warm-up End')
-    axes[0].set_xlabel('Global Communication Rounds')
-    axes[0].set_ylabel('Validation Accuracy (%)')
-    axes[0].set_title('Validation Accuracy Comparison')
-    axes[0].legend()
-    axes[0].grid(True)
-
-    # 子图2: 验证集Loss对比
-    axes[1].plot(epochs, v_loss_base, 'r--o', label='FedAvg')
-    axes[1].plot(epochs, v_loss_salf, 'g-^', label='SALF')
-    axes[1].plot(epochs, v_loss_dmfl, 'b-s', label='DMFL')
-    if args.warmup_rounds > 0:
-        axes[1].axvline(x=args.warmup_rounds, color='gray', linestyle=':', label='Warm-up End')
-    axes[1].set_xlabel('Global Communication Rounds')
-    axes[1].set_ylabel('Validation Loss')
-    axes[1].set_title('Validation Loss Comparison')
-    axes[1].legend()
-    axes[1].grid(True)
-
-    plt.suptitle('Comparison of FL Methods: Validation Set Only')
+        plt.axvline(x=args.warmup_rounds, color='gray', linestyle=':', label='Warm-up End')
+    plt.xlabel('Global Communication Rounds')
+    plt.ylabel('Validation Accuracy (%)')
+    plt.title('Validation Accuracy Comparison')
+    plt.legend()
+    plt.grid(True)
     plt.tight_layout()
+
+    # ================= 图2: 验证集 Loss =================
+    plt.figure(2, figsize=(8, 6))
+    plt.plot(epochs, v_loss_base, 'r--o', markersize=ms, label='FedAvg')
+    plt.plot(epochs, v_loss_salf, 'g-^', markersize=ms, label='SALF')
+    plt.plot(epochs, v_loss_dmfl, 'b-s', markersize=ms, label='DMFL')
+    if args.warmup_rounds > 0:
+        plt.axvline(x=args.warmup_rounds, color='gray', linestyle=':', label='Warm-up End')
+    plt.xlabel('Global Communication Rounds')
+    plt.ylabel('Validation Loss')
+    plt.title('Validation Loss Comparison')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+
     plt.show()

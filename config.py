@@ -3,13 +3,14 @@ import torch
 
 class Config:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dataset_name = 'cifar10'  # 可选: 'mnist' 或 'cifar10'
 
     # --- 环境与联邦学习设置 ---
     num_users = 30
     num_edge_servers = 3
     num_global_rounds = 100
     num_local_epochs = 3
-    batch_size = 64         #   3.27 第二次
+    batch_size = 64
     lr = 0.005
     momentum = 0.5
 
@@ -26,7 +27,7 @@ class Config:
     t_deadline = 1.0  # 物理死线时间
     noise_scale = 0.02  # 6G信道噪声尺度
     # --- 扩散模型设置 ---
-    diff_timesteps = 50         #3.27 修改以下三个参数 原来20 64 0.005
+    diff_timesteps = 50
     diff_hidden_dim = 256
     diff_lr = 0.001
     warmup_rounds = 20
