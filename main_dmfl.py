@@ -25,7 +25,7 @@ class EdgeState:
 
         self.hist_grads = {i: torch.zeros(param_dim).to(args.device) for i in range(num_clients)}
         self.buf_hist, self.buf_targ = [], []
-        self.max_buf = num_clients * 20 #3.31 经验池加大
+        self.max_buf = num_clients * 5      #经验池数量
 
 
 def evaluate(model, dataset):
@@ -43,7 +43,7 @@ def evaluate(model, dataset):
 
 
 def run_dmfl(skip_train_eval=False):
-    print("\n>>> 正在进行仿真: Method = DMFL (CIFAR-10)")
+    print("\n>>> 正在进行仿真: Method = DMFL")
     train_data, test_data = get_dataset()
     user_groups = split_data(train_data, args.num_users)
 
@@ -88,7 +88,13 @@ def run_dmfl(skip_train_eval=False):
                         head_curr, head_hist = grad[-state.diff_dim:], state.hist_grads[i][-state.diff_dim:]
                         state.buf_hist.append(head_hist.detach().clone())
                         state.buf_targ.append((head_curr - head_hist).detach().clone())
-                    state.hist_grads[i] = grad.detach().clone()
+                    # 将原来的：state.hist_grads[i] = grad.detach().clone()
+                    # 修改为 EMA 平滑更新：
+                    if torch.norm(state.hist_grads[i]) == 0:
+                        state.hist_grads[i] = grad.detach().clone()
+                    else:
+                        # 用 0.6 的动量保留历史，0.4 吸收当前（过滤剧烈噪声）
+                        state.hist_grads[i] = 0.6 * state.hist_grads[i] + 0.4 * grad.detach().clone()
 
                 elif epoch > args.warmup_rounds:
                     base_grad = state.hist_grads[i].clone()
@@ -98,7 +104,7 @@ def run_dmfl(skip_train_eval=False):
 
                         norm_d, norm_b = torch.norm(delta), torch.norm(head_hist)
                         if norm_d > norm_b:
-                            delta = delta * (norm_b / (norm_d + 1e-6)) * 0.5
+                            delta = delta * (norm_b / (norm_d + 1e-6))    #MNIST情况下要*0.5，CIFAR不用
 
                         base_grad[-state.diff_dim:] += delta
                         valid_grads.append(base_grad)
@@ -111,7 +117,7 @@ def run_dmfl(skip_train_eval=False):
                 loader = DataLoader(dataset, batch_size=32, shuffle=True)
 
                 state.diffusion.train()
-                for _ in range(5):  # 扩撒模型训练次数
+                for _ in range(10):  # 扩撒模型训练次数
                     for targ, hist in loader:
                         loss = state.diffusion.train_step(targ, hist)
                         state.optimizer.zero_grad()

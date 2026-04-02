@@ -28,7 +28,7 @@ def evaluate_model(model, dataset):
 
 
 def run_fedavg(skip_train_eval=False):
-    print("\n>>> 正在进行仿真: Method = FedAvg (CIFAR-10)")
+    print("\n>>> 正在进行仿真: Method = FedAvg")
     train_data, test_data = get_dataset()
     user_groups = split_data(train_data, args.num_users)
 

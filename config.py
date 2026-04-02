@@ -8,7 +8,7 @@ class Config:
     # --- 环境与联邦学习设置 ---
     num_users = 30
     num_edge_servers = 3
-    num_global_rounds = 100
+    num_global_rounds = 200
     num_local_epochs = 3
     batch_size = 64
     lr = 0.005
@@ -28,7 +28,7 @@ class Config:
     noise_scale = 0.02  # 6G信道噪声尺度
     # --- 扩散模型设置 ---
     diff_timesteps = 50
-    diff_hidden_dim = 256
+    diff_hidden_dim = 2048
     diff_lr = 0.001
     warmup_rounds = 20
 
