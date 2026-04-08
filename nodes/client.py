@@ -34,7 +34,7 @@ class LocalClient:
             for images, labels in self.ldr_train:
                 images, labels = images.to(args.device), labels.to(args.device)
                 optimizer.zero_grad()
-                loss = nn.CrossEntropyLoss()(self.model(images), labels)
+                loss = nn.CrossEntropyLoss()(self.model(images), labels)        #本地客户端使用交叉熵损失
                 loss.backward()
                 optimizer.step()
 

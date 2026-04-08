@@ -3,13 +3,14 @@ import torch
 
 class Config:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dataset_name = 'mnist'  # 可选: 'mnist' 或 'cifar10'
 
     # --- 环境与联邦学习设置 ---
     num_users = 30
     num_edge_servers = 3
-    num_global_rounds = 30
+    num_global_rounds = 50
     num_local_epochs = 3
-    batch_size = 16
+    batch_size = 64
     lr = 0.01
     momentum = 0.5
 
@@ -24,12 +25,11 @@ class Config:
     # 掉队率
     target_straggler_rate = 0.5
     t_deadline = 1.0  # 物理死线时间
-    noise_scale = 0.02  # 6G信道噪声尺度
-
+    noise_scale = 0.001  # 6G信道噪声尺度
     # --- 扩散模型设置 ---
-    diff_timesteps = 20
-    diff_hidden_dim = 64
-    diff_lr = 0.005
+    diff_timesteps = 50
+    diff_hidden_dim = 1024
+    diff_lr = 0.001
     warmup_rounds = 5
 
     data_path = './data'
