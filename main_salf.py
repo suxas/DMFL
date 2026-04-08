@@ -45,10 +45,8 @@ def run_salf(skip_train_eval=False):
 
     if args.dataset_name == 'cifar10':
         global_model = CNNCifar().to(args.device)
-        diff_dim = 850
     else:
         global_model = SimpleCNN().to(args.device)
-        diff_dim = 510
 
     param_dim = flatten_params(global_model).numel()
 

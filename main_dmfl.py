@@ -5,6 +5,23 @@ import matplotlib.pyplot as plt
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
+import random      # 新增
+import numpy as np # 新增
+
+# 固定随机种子的函数
+def set_seed(seed=42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+    # 强制 cuDNN 使用确定性算法
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+set_seed(42)
+
 
 from config import args
 from dataset import get_dataset, split_data
@@ -49,7 +66,7 @@ def run_dmfl(skip_train_eval=False):
 
     if args.dataset_name == 'cifar10':
         global_model = CNNCifar().to(args.device)
-        diff_dim = 850
+        diff_dim = 510
     else:
         global_model = SimpleCNN().to(args.device)
         diff_dim = 510
@@ -88,13 +105,7 @@ def run_dmfl(skip_train_eval=False):
                         head_curr, head_hist = grad[-state.diff_dim:], state.hist_grads[i][-state.diff_dim:]
                         state.buf_hist.append(head_hist.detach().clone())
                         state.buf_targ.append((head_curr - head_hist).detach().clone())
-                    # 将原来的：state.hist_grads[i] = grad.detach().clone()
-                    # 修改为 EMA 平滑更新：
-                    if torch.norm(state.hist_grads[i]) == 0:
-                        state.hist_grads[i] = grad.detach().clone()
-                    else:
-                        # 用 0.6 的动量保留历史，0.4 吸收当前（过滤剧烈噪声）
-                        state.hist_grads[i] = 0.6 * state.hist_grads[i] + 0.4 * grad.detach().clone()
+                    state.hist_grads[i] = grad.detach().clone()
 
                 elif epoch > args.warmup_rounds:
                     base_grad = state.hist_grads[i].clone()
@@ -104,7 +115,7 @@ def run_dmfl(skip_train_eval=False):
 
                         norm_d, norm_b = torch.norm(delta), torch.norm(head_hist)
                         if norm_d > norm_b:
-                            delta = delta * (norm_b / (norm_d + 1e-6))    #MNIST情况下要*0.5，CIFAR不用
+                            delta = delta * (norm_b / (norm_d + 1e-6)) * 0.8   #MNIST情况下要*0.5，CIFAR*0.8
 
                         base_grad[-state.diff_dim:] += delta
                         valid_grads.append(base_grad)
