@@ -70,4 +70,4 @@ class GradientDiffusion(nn.Module):
         x_t = sqrt_alpha * target_grad + sqrt_one_minus_alpha * noise
 
         # 预测噪声并计算损失
-        return nn.MSELoss()(self.forward(x_t, t, condition_grad), noise)    #扩散模型使用MSE
+        return nn.MSELoss()(self.forward(x_t, t, condition_grad), noise)
