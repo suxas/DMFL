@@ -1,5 +1,9 @@
 import matplotlib.pyplot as plt
+import torch
+
 from config import args
+print(f"CUDA 是否可用: {torch.cuda.is_available()}")
+print(f"当前分配的设备: {args.device}")
 
 # 从各个独立脚本导入仿真运行函数
 from main_fedavg import run_fedavg

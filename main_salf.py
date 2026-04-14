@@ -13,6 +13,7 @@ from utils import flatten_params, unflatten_params
 from nodes.client import LocalClient
 from nodes.edge import EdgeServer
 
+
 def get_salf_partial_grad(model, full_grad_vec):
     param_sizes = [p.numel() for p in model.parameters()]
     num_of_layers = len(param_sizes)
@@ -21,9 +22,12 @@ def get_salf_partial_grad(model, full_grad_vec):
     num_zeros = sum(param_sizes[:layers_to_zero])
 
     salf_grad_vec = full_grad_vec.clone()
+    mask_vec = torch.ones_like(full_grad_vec)
     if num_zeros > 0:
         salf_grad_vec[:num_zeros] = 0.0
-    return salf_grad_vec
+        mask_vec[:num_zeros] = 0.0  # SALF要求只统计上传了此层的客户端数量
+    return salf_grad_vec, mask_vec
+
 
 def evaluate_model(model, dataset):
     model.eval()
@@ -38,8 +42,9 @@ def evaluate_model(model, dataset):
             correct += pred.eq(target.view_as(pred)).sum().item()
     return 100. * correct / len(dataset), total_loss / len(dataset)
 
+
 def run_salf(skip_train_eval=False):
-    print("\n>>> 正在进行仿真: Method = SALF (CIFAR-10)")
+    print(f"\n>>> 正在进行仿真: Method = SALF ({args.dataset_name.upper()})")
     train_data, test_data = get_dataset()
     user_groups = split_data(train_data, args.num_users)
 
@@ -62,10 +67,13 @@ def run_salf(skip_train_eval=False):
     for epoch in pbar:
         global_model.train()
         global_weights = global_model.state_dict()
+
         edge_grads = []
+        edge_masks = []  # 记录边缘节点的层级掩码
 
         for edge_server in edge_servers:
             valid_grads = []
+            valid_masks = []
 
             client_conditions = [client.simulate_physical_conditions(param_dim) for client in edge_server.clients]
             total_times = [c[0] + c[1] for c in client_conditions]
@@ -76,17 +84,25 @@ def run_salf(skip_train_eval=False):
 
             for local_idx, client in enumerate(edge_server.clients):
                 t_train, t_up = client_conditions[local_idx][:2]
+                full_grad = client.train(global_weights)
+
                 if (t_train + t_up) <= dynamic_t_win:
-                    valid_grads.append(client.train(global_weights))
+                    valid_grads.append(full_grad)
+                    valid_masks.append(torch.ones_like(full_grad))
                 else:
-                    full_grad = client.train(global_weights)
-                    valid_grads.append(get_salf_partial_grad(global_model, full_grad))
+                    partial_grad, mask = get_salf_partial_grad(global_model, full_grad)
+                    valid_grads.append(partial_grad)
+                    valid_masks.append(mask)
 
             if valid_grads:
-                edge_grads.append(torch.stack(valid_grads).mean(dim=0))
+                edge_grads.append(torch.stack(valid_grads).sum(dim=0))
+                edge_masks.append(torch.stack(valid_masks).sum(dim=0))
 
         if edge_grads:
-            global_grad = torch.stack(edge_grads).mean(dim=0)
+            total_grad_sum = sum(edge_grads)
+            total_mask_sum = sum(edge_masks)
+            # layer-wise 安全均值计算，除以实际计算了该层的客户端数量 (至少为1防止除零错误)
+            global_grad = total_grad_sum / torch.clamp(total_mask_sum, min=1.0)
             unflatten_params(global_model, flatten_params(global_model) - global_grad)
 
         val_acc, val_loss = evaluate_model(global_model, test_data)
@@ -107,15 +123,12 @@ def run_salf(skip_train_eval=False):
 
 
 if __name__ == '__main__':
-    # 独立运行时，默认计算训练集 (skip_train_eval=False)
     t_acc, t_loss, v_acc, v_loss = run_salf(skip_train_eval=False)
     epochs = range(1, args.num_global_rounds + 1)
-    ms = 3  # 缩小描点体积
+    ms = 3
 
-    # 绘制独立运行时的 Train vs Validation 对比图
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
-    # 精度图
     axes[0].plot(epochs, t_acc, 'b--o', markersize=ms, label='Train Accuracy')
     axes[0].plot(epochs, v_acc, 'r-^', markersize=ms, label='Validation Accuracy')
     if args.warmup_rounds > 0:
@@ -126,7 +139,6 @@ if __name__ == '__main__':
     axes[0].legend()
     axes[0].grid(True)
 
-    # Loss图
     axes[1].plot(epochs, t_loss, 'b--o', markersize=ms, label='Train Loss')
     axes[1].plot(epochs, v_loss, 'r-^', markersize=ms, label='Validation Loss')
     if args.warmup_rounds > 0:

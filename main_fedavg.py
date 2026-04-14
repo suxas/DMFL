@@ -4,10 +4,9 @@ import matplotlib.pyplot as plt
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-
 from config import args
 from dataset import get_dataset, split_data
-from models.network import SimpleCNN, CNNCifar
+from models.network import SimpleCNN, CNNCifar,VGG11CIFAR,VGG13CIFAR,VGG16CIFAR,VGG19CIFAR
 from utils import flatten_params, unflatten_params
 from nodes.client import LocalClient
 from nodes.edge import EdgeServer
@@ -33,7 +32,7 @@ def run_fedavg(skip_train_eval=False):
     user_groups = split_data(train_data, args.num_users)
 
     if args.dataset_name == 'cifar10':
-        global_model = CNNCifar().to(args.device)
+        global_model = VGG11CIFAR().to(args.device)
     else:
         global_model = SimpleCNN().to(args.device)
 
@@ -51,7 +50,9 @@ def run_fedavg(skip_train_eval=False):
     for epoch in pbar:
         global_model.train()
         global_weights = global_model.state_dict()
+
         edge_grads = []
+        edge_weights = []  # 记录有效客户端的数量进行加权
 
         for edge_server in edge_servers:
             valid_grads = []
@@ -69,10 +70,14 @@ def run_fedavg(skip_train_eval=False):
                     valid_grads.append(client.train(global_weights))
 
             if valid_grads:
-                edge_grads.append(torch.stack(valid_grads).mean(dim=0))
+                edge_grads.append(torch.stack(valid_grads).sum(dim=0))  # 边缘改为求和
+                edge_weights.append(len(valid_grads))
 
         if edge_grads:
-            global_grad = torch.stack(edge_grads).mean(dim=0)
+            #根据全网的有效客户端数量进行加权平均
+            total_grad_sum = sum(edge_grads)
+            total_weights = sum(edge_weights)
+            global_grad = total_grad_sum / total_weights
             unflatten_params(global_model, flatten_params(global_model) - global_grad)
 
         val_acc, val_loss = evaluate_model(global_model, test_data)
@@ -93,15 +98,12 @@ def run_fedavg(skip_train_eval=False):
 
 
 if __name__ == '__main__':
-    # 独立运行时，默认计算训练集 (skip_train_eval=False)
     t_acc, t_loss, v_acc, v_loss = run_fedavg(skip_train_eval=False)
     epochs = range(1, args.num_global_rounds + 1)
-    ms = 3  # 缩小描点体积
+    ms = 3
 
-    # 绘制独立运行时的 Train vs Validation 对比图
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
-    # 精度图
     axes[0].plot(epochs, t_acc, 'b--o', markersize=ms, label='Train Accuracy')
     axes[0].plot(epochs, v_acc, 'r-^', markersize=ms, label='Validation Accuracy')
     if args.warmup_rounds > 0:
@@ -112,7 +114,6 @@ if __name__ == '__main__':
     axes[0].legend()
     axes[0].grid(True)
 
-    # Loss图
     axes[1].plot(epochs, t_loss, 'b--o', markersize=ms, label='Train Loss')
     axes[1].plot(epochs, v_loss, 'r-^', markersize=ms, label='Validation Loss')
     if args.warmup_rounds > 0:

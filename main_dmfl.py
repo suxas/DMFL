@@ -25,7 +25,7 @@ set_seed(42)
 
 from config import args
 from dataset import get_dataset, split_data
-from models.network import SimpleCNN, CNNCifar
+from models.network import SimpleCNN, CNNCifar,VGG11CIFAR,VGG13CIFAR,VGG16CIFAR,VGG19CIFAR
 from models.diffusion import GradientDiffusion
 from utils import flatten_params, unflatten_params
 from nodes.client import LocalClient
@@ -34,7 +34,6 @@ from nodes.edge import EdgeServer
 
 class EdgeState:
     def __init__(self, num_clients, param_dim, diff_dim):
-        # CIFAR-10 网络 CNNCifar 最后一层 (fc3) 参数量: 84 * 10 + 10 = 850
         self.diff_dim = diff_dim
         self.diffusion = GradientDiffusion(self.diff_dim, args.diff_hidden_dim, args.diff_timesteps).to(args.device)
         self.optimizer = optim.SGD(self.diffusion.parameters(), lr=args.diff_lr, momentum=args.momentum,
@@ -42,7 +41,7 @@ class EdgeState:
 
         self.hist_grads = {i: torch.zeros(param_dim).to(args.device) for i in range(num_clients)}
         self.buf_hist, self.buf_targ = [], []
-        self.max_buf = num_clients * 5      #经验池数量
+        self.max_buf = num_clients * 5  # 经验池数量
 
 
 def evaluate(model, dataset):
@@ -65,7 +64,7 @@ def run_dmfl(skip_train_eval=False):
     user_groups = split_data(train_data, args.num_users)
 
     if args.dataset_name == 'cifar10':
-        global_model = CNNCifar().to(args.device)
+        global_model = VGG11CIFAR().to(args.device)
         diff_dim = 510
     else:
         global_model = SimpleCNN().to(args.device)
@@ -87,7 +86,9 @@ def run_dmfl(skip_train_eval=False):
     for epoch in pbar:
         global_model.train()
         global_weights = global_model.state_dict()
+
         edge_grads = []
+        edge_weights = []
 
         for server in edge_servers:
             state = states[server.id]
@@ -115,7 +116,7 @@ def run_dmfl(skip_train_eval=False):
 
                         norm_d, norm_b = torch.norm(delta), torch.norm(head_hist)
                         if norm_d > norm_b:
-                            delta = delta * (norm_b / (norm_d + 1e-6)) * 0.8   #MNIST情况下要*0.5，CIFAR*0.8
+                            delta = delta * (norm_b / (norm_d + 1e-6)) * 0.8  # MNIST情况下要*0.5，CIFAR*0.8
 
                         base_grad[-state.diff_dim:] += delta
                         valid_grads.append(base_grad)
@@ -136,10 +137,13 @@ def run_dmfl(skip_train_eval=False):
                         state.optimizer.step()
 
             if valid_grads:
-                edge_grads.append(torch.stack(valid_grads).mean(dim=0))
+                edge_grads.append(torch.stack(valid_grads).sum(dim=0))
+                edge_weights.append(len(valid_grads))
 
         if edge_grads:
-            global_grad = torch.stack(edge_grads).mean(dim=0)
+            total_grad_sum = sum(edge_grads)
+            total_weights = sum(edge_weights)
+            global_grad = total_grad_sum / total_weights
             unflatten_params(global_model, flatten_params(global_model) - global_grad)
 
         acc_v, loss_v = evaluate(global_model, test_data)
@@ -158,16 +162,14 @@ def run_dmfl(skip_train_eval=False):
 
     return t_acc, t_loss, v_acc, v_loss
 
+
 if __name__ == '__main__':
-    # 独立运行时，默认计算训练集 (skip_train_eval=False)
     t_acc, t_loss, v_acc, v_loss = run_dmfl(skip_train_eval=False)
     epochs = range(1, args.num_global_rounds + 1)
-    ms = 2  # 缩小描点体积
+    ms = 2
 
-    # 绘制独立运行时的 Train vs Validation 对比图
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
-    # 精度图
     axes[0].plot(epochs, t_acc, 'b--o', markersize=ms, label='Train Accuracy')
     axes[0].plot(epochs, v_acc, 'r-^', markersize=ms, label='Validation Accuracy')
     if args.warmup_rounds > 0:
@@ -178,7 +180,6 @@ if __name__ == '__main__':
     axes[0].legend()
     axes[0].grid(True)
 
-    # Loss图
     axes[1].plot(epochs, t_loss, 'b--o', markersize=ms, label='Train Loss')
     axes[1].plot(epochs, v_loss, 'r-^', markersize=ms, label='Validation Loss')
     if args.warmup_rounds > 0:

@@ -26,7 +26,8 @@ class LocalClient:
     def train(self, global_weights):
         self.model.load_state_dict(global_weights)
         self.model.train()
-        optimizer = optim.SGD(self.model.parameters(), lr=args.lr)
+        # 加入 config 中定义的 momentum
+        optimizer = optim.SGD(self.model.parameters(), lr=args.lr, momentum=args.momentum)
 
         initial_params = flatten_params(self.model).detach().clone()
 
@@ -37,9 +38,12 @@ class LocalClient:
                 loss = nn.CrossEntropyLoss()(self.model(images), labels)        #本地客户端使用交叉熵损失
                 loss.backward()
                 optimizer.step()
+                break       # 控制本地客户端跑一个batch
 
         grad_vec = initial_params - flatten_params(self.model).detach().clone()
 
-        # 附加信道噪声
-        noise_std = random.uniform(0.5, 1.5) * getattr(args, 'noise_scale', 0.02)
-        return grad_vec + torch.randn_like(grad_vec) * noise_std
+        # 附加信道噪声 (删除不必要的随机波动，严格受 config.noise_scale 控制)
+        noise_std = args.noise_scale
+        if noise_std > 0:
+            return grad_vec + torch.randn_like(grad_vec) * noise_std
+        return grad_vec
