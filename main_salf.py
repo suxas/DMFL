@@ -8,7 +8,7 @@ from tqdm import tqdm
 
 from config import args
 from dataset import get_dataset, split_data
-from models.network import SimpleCNN, CNNCifar
+from models.network import SimpleCNN, CNNCifar,VGG11CIFAR,VGG13CIFAR,VGG16CIFAR,VGG19CIFAR
 from utils import flatten_params, unflatten_params
 from nodes.client import LocalClient
 from nodes.edge import EdgeServer
@@ -49,7 +49,7 @@ def run_salf(skip_train_eval=False):
     user_groups = split_data(train_data, args.num_users)
 
     if args.dataset_name == 'cifar10':
-        global_model = CNNCifar().to(args.device)
+        global_model = VGG11CIFAR().to(args.device)
     else:
         global_model = SimpleCNN().to(args.device)
 

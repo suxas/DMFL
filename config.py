@@ -8,11 +8,11 @@ class Config:
 
     # --- 环境与联邦学习设置 ---
     num_users = 30
-    num_edge_servers = 1
+    num_edge_servers = 3
     num_global_rounds = 100
     num_local_epochs = 1
-    batch_size = 16
-    lr = 0.1
+    batch_size = 64
+    lr = 0.01       #非常重要，0.1acc不涨，0.01提升明显 4.14
     momentum = 0.5
 
     # --- 物理通信与计算参数 ---
@@ -24,8 +24,8 @@ class Config:
     cycles_per_sample = 2e4
 
     # 掉队率
-    target_straggler_rate = 0
-    t_deadline = 1.0  # 物理死线时间
+    target_straggler_rate = 0.5
+    t_deadline = 99999  # 物理死线时间    VGG参数过多，deadline不好设置 4.14
     noise_scale = 0  # 噪声尺度
 
     # --- 扩散模型设置 ---

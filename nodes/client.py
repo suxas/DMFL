@@ -38,7 +38,6 @@ class LocalClient:
                 loss = nn.CrossEntropyLoss()(self.model(images), labels)        #本地客户端使用交叉熵损失
                 loss.backward()
                 optimizer.step()
-                break       # 控制本地客户端跑一个batch
 
         grad_vec = initial_params - flatten_params(self.model).detach().clone()
 

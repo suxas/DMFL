@@ -65,7 +65,7 @@ def run_dmfl(skip_train_eval=False):
 
     if args.dataset_name == 'cifar10':
         global_model = VGG11CIFAR().to(args.device)
-        diff_dim = 510
+        diff_dim = 5130
     else:
         global_model = SimpleCNN().to(args.device)
         diff_dim = 510
