@@ -32,6 +32,9 @@ if __name__ == '__main__':
     plt.grid(True)
     plt.tight_layout()
 
+    acc_filename = f"Results_Accuracy_{args.dataset_name}_Rounds{args.num_global_rounds}.png"
+    plt.savefig(acc_filename, dpi=300, bbox_inches='tight')
+
     # ================= 图2: 验证集 Loss =================
     plt.figure(2, figsize=(8, 6))
     plt.plot(epochs, v_loss_base, 'r--o', markersize=ms, label='FedAvg')
@@ -45,5 +48,8 @@ if __name__ == '__main__':
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
+
+    loss_filename = f"Results_Loss_{args.dataset_name}_Rounds{args.num_global_rounds}.png"
+    plt.savefig(loss_filename, dpi=300, bbox_inches='tight')
 
     plt.show()

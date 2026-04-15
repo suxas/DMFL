@@ -11,10 +11,9 @@ class Config:
     # --- 环境与联邦学习设置 ---
     num_users = 30
     num_edge_servers = 3
-    num_global_rounds = 1000
-    num_local_epochs = 3
+    num_global_rounds = 1
+    num_local_epochs = 1
     batch_size = 64
-
     lr = 0.01
     momentum = 0.5
 

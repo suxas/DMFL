@@ -129,4 +129,5 @@ if __name__ == '__main__':
     axes[1].grid(True)
 
     plt.tight_layout()
+
     plt.show()
