@@ -11,13 +11,12 @@ class Config:
     # --- 环境与联邦学习设置 ---
     num_users = 30
     num_edge_servers = 3
-    num_global_rounds = 100
-    num_local_epochs = 1
-    batch_size = 16
+    num_global_rounds = 1000
+    num_local_epochs = 3
+    batch_size = 64
 
     lr = 0.01
     momentum = 0.5
-    weight_decay = 5e-4  # <==== 【新增】：L2正则化，抑制权重膨胀，彻底解决 Loss 上翘
 
     # --- 物理通信与计算参数 ---
     bandwidth = 1e6

@@ -7,7 +7,6 @@ class SimpleCNN(nn.Module):
     """
     基于 SALF 论文中的 CNN2Layer 结构，用于 MNIST
     """
-
     def __init__(self, in_channels=1, output_size=10, data='mnist', kernel_size=5, intemidiate_size_1=6,
                  intemidiate_size_2=50):
         super(SimpleCNN, self).__init__()
@@ -108,7 +107,6 @@ class VGGBase(nn.Module):
             if x == 'M':
                 layers += [nn.MaxPool2d(kernel_size=2, stride=2)]
             else:
-                # 【核心修复】：使用 GroupNorm 完美平替 BatchNorm，彻底解决 2.3 死锁问题
                 layers += [
                     nn.Conv2d(in_channels, x, kernel_size=3, padding=1),
                     nn.GroupNorm(num_groups=32, num_channels=x),  # 加入组归一化

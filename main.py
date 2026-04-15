@@ -16,7 +16,7 @@ if __name__ == '__main__':
     _, _, v_acc_dmfl, v_loss_dmfl = run_dmfl(skip_train_eval=True)
 
     epochs = range(1, args.num_global_rounds + 1)
-    ms = 2  # 描点体积
+    ms = 2
 
     # ================= 图1: 验证集精度 =================
     plt.figure(1, figsize=(8, 6))

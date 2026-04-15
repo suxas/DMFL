@@ -26,13 +26,7 @@ class LocalClient:
         self.model.load_state_dict(global_weights)
         self.model.train()
 
-        # 【核心修复】：将 config 中的 weight_decay 传入 SGD
-        optimizer = optim.SGD(
-            self.model.parameters(),
-            lr=args.lr,
-            momentum=args.momentum,
-            weight_decay=args.weight_decay
-        )
+        optimizer = optim.SGD(self.model.parameters(), lr=args.lr, momentum=args.momentum)
 
         initial_params = flatten_params(self.model).detach().clone()
 

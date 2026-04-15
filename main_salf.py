@@ -121,7 +121,7 @@ def run_salf(skip_train_eval=False):
 
         # 学习率衰减
         if epoch == int(args.num_global_rounds * 0.5) or epoch == int(args.num_global_rounds * 0.75):
-           args.lr *= 0.1
+            args.lr *= 0.1
 
     return t_acc_hist, t_loss_hist, v_acc_hist, v_loss_hist
 
