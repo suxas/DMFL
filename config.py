@@ -1,3 +1,6 @@
+"""
+4.17 0.9掉队，0.1簇内iid，0.15比例热身，lr分别为0.005和0.001，噪声程度0.001
+"""
 import torch
 
 torch.backends.cudnn.benchmark = True
