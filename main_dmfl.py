@@ -161,8 +161,8 @@ def run_dmfl(skip_train_eval=False):
         pbar.set_postfix({'Val Acc': f"{acc_v:.2f}%", 'Val Loss': f"{loss_v:.4f}"})
 
         # 学习率衰减
-        if epoch == int(args.num_global_rounds * 0.5) or epoch == int(args.num_global_rounds * 0.75):
-            args.lr *= 0.1
+        #if epoch == int(args.num_global_rounds * 0.5) or epoch == int(args.num_global_rounds * 0.75):
+        #    args.lr *= 0.1
 
     return t_acc, t_loss, v_acc, v_loss
 

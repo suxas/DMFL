@@ -8,7 +8,7 @@ from tqdm import tqdm
 
 from config import args
 from dataset import get_dataset, split_data
-from models.network import SimpleCNN, CNNCifar,VGG11CIFAR,VGG13CIFAR,VGG16CIFAR,VGG19CIFAR
+from models.network import SimpleCNN, CNNCifar, VGG11CIFAR, VGG13CIFAR, VGG16CIFAR, VGG19CIFAR
 from utils import flatten_params, unflatten_params
 from nodes.client import LocalClient
 from nodes.edge import EdgeServer
@@ -17,16 +17,18 @@ from nodes.edge import EdgeServer
 def get_salf_partial_grad(model, full_grad_vec):
     param_sizes = [p.numel() for p in model.parameters()]
     num_of_layers = len(param_sizes)
+    # SALF 原版逻辑：随机选择保留最后 up_to_layer 层
     up_to_layer = np.random.randint(1, num_of_layers + 1)
     layers_to_zero = num_of_layers - up_to_layer
     num_zeros = sum(param_sizes[:layers_to_zero])
 
     salf_grad_vec = full_grad_vec.clone()
-    mask_vec = torch.ones_like(full_grad_vec)
+    # 丢弃的前半部分层，梯度置为 0
     if num_zeros > 0:
         salf_grad_vec[:num_zeros] = 0.0
-        mask_vec[:num_zeros] = 0.0  # SALF要求只统计上传了此层的客户端数量
-    return salf_grad_vec, mask_vec
+
+    # 彻底去掉多余的 mask_vec 优化
+    return salf_grad_vec
 
 
 def evaluate_model(model, dataset):
@@ -69,16 +71,18 @@ def run_salf(skip_train_eval=False):
         global_weights = global_model.state_dict()
 
         edge_grads = []
-        edge_masks = []  # 记录边缘节点的层级掩码
+        edge_weights = []  # 恢复为 weights，记录总客户端数量，去掉 mask
 
         for edge_server in edge_servers:
             valid_grads = []
-            valid_masks = []
 
             client_conditions = [client.simulate_physical_conditions(param_dim) for client in edge_server.clients]
             total_times = [c[0] + c[1] for c in client_conditions]
 
-            K_min = max(2, int(len(edge_server.clients) * 0.5))
+            # 根据 config 中的掉队率动态计算存活阈值
+            # 存活率 = 1 - 掉队率。max(1, ...) 确保极端网络下至少有一个节点存活
+            survival_rate = 1.0 - args.target_straggler_rate
+            K_min = max(1, int(len(edge_server.clients) * survival_rate))
             sorted_times = sorted(total_times)
             dynamic_t_win = min(args.t_deadline, sorted_times[K_min - 1])
 
@@ -88,21 +92,22 @@ def run_salf(skip_train_eval=False):
 
                 if (t_train + t_up) <= dynamic_t_win:
                     valid_grads.append(full_grad)
-                    valid_masks.append(torch.ones_like(full_grad))
                 else:
-                    partial_grad, mask = get_salf_partial_grad(global_model, full_grad)
+                    # 获取原版 SALF 部分梯度
+                    partial_grad = get_salf_partial_grad(global_model, full_grad)
                     valid_grads.append(partial_grad)
-                    valid_masks.append(mask)
 
             if valid_grads:
                 edge_grads.append(torch.stack(valid_grads).sum(dim=0))
-                edge_masks.append(torch.stack(valid_masks).sum(dim=0))
+                edge_weights.append(len(valid_grads))
 
         if edge_grads:
             total_grad_sum = sum(edge_grads)
-            total_mask_sum = sum(edge_masks)
-            # layer-wise 安全均值计算，除以实际计算了该层的客户端数量 (至少为1防止除零错误)
-            global_grad = total_grad_sum / torch.clamp(total_mask_sum, min=1.0)
+            total_weights = sum(edge_weights)
+
+            # 【对齐 GitHub 原版】：不看有效层数，强制除以本轮参与的所有客户端总数 (total_weights)
+            # 这会导致丢弃较多的浅层网络梯度严重缩水，这是原版 SALF 的真实特性
+            global_grad = total_grad_sum / total_weights
             unflatten_params(global_model, flatten_params(global_model) - global_grad)
 
         val_acc, val_loss = evaluate_model(global_model, test_data)
@@ -120,8 +125,8 @@ def run_salf(skip_train_eval=False):
         pbar.set_postfix({'Val Acc': f"{val_acc:.2f}%", 'Val Loss': f"{val_loss:.4f}"})
 
         # 学习率衰减
-        if epoch == int(args.num_global_rounds * 0.5) or epoch == int(args.num_global_rounds * 0.75):
-           args.lr *= 0.1
+        # if epoch == int(args.num_global_rounds * 0.5) or epoch == int(args.num_global_rounds * 0.75):
+        #   args.lr *= 0.1
 
     return t_acc_hist, t_loss_hist, v_acc_hist, v_loss_hist
 

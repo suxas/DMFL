@@ -60,7 +60,10 @@ def run_fedavg(skip_train_eval=False):
             client_conditions = [client.simulate_physical_conditions(param_dim) for client in edge_server.clients]
             total_times = [c[0] + c[1] for c in client_conditions]
 
-            K_min = max(2, int(len(edge_server.clients) * 0.5))
+            # 根据 config 中的掉队率动态计算存活阈值
+            # 存活率 = 1 - 掉队率。max(1, ...) 确保极端网络下至少有一个节点存活
+            survival_rate = 1.0 - args.target_straggler_rate
+            K_min = max(1, int(len(edge_server.clients) * survival_rate))
             sorted_times = sorted(total_times)
             dynamic_t_win = min(args.t_deadline, sorted_times[K_min - 1])
 
@@ -95,8 +98,8 @@ def run_fedavg(skip_train_eval=False):
         pbar.set_postfix({'Val Acc': f"{val_acc:.2f}%", 'Val Loss': f"{val_loss:.4f}"})
 
         # 学习率衰减
-        if epoch == int(args.num_global_rounds * 0.5) or epoch == int(args.num_global_rounds * 0.75):
-           args.lr *= 0.1
+        #if epoch == int(args.num_global_rounds * 0.5) or epoch == int(args.num_global_rounds * 0.75):
+        #   args.lr *= 0.1
 
     return t_acc_hist, t_loss_hist, v_acc_hist, v_loss_hist
 

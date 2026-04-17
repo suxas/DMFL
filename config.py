@@ -11,11 +11,12 @@ class Config:
     # --- 环境与联邦学习设置 ---
     num_users = 30
     num_edge_servers = 3
-    num_global_rounds = 1
+    num_global_rounds = 500
     num_local_epochs = 1
-    batch_size = 64
-    lr = 0.01
-    momentum = 0.5
+    batch_size = 64         # 客户端本地训练batchsize
+    lr = 0.005              # 客户端本地训练学习率
+    momentum = 0.5          # 客户端本地训练动量
+    inner_client_iid = 0.1  # 控制簇内IID程度
 
     # --- 物理通信与计算参数 ---
     bandwidth = 1e6
@@ -26,7 +27,7 @@ class Config:
     cycles_per_sample = 2e4
 
     # 掉队率与物理死线
-    target_straggler_rate = 0.5
+    target_straggler_rate = 0.9
     t_deadline = 99999.0
     noise_scale = 0.001
 
@@ -34,7 +35,7 @@ class Config:
     diff_timesteps = 50
     diff_hidden_dim = 1024
     diff_lr = 0.001
-    warmup_rounds = num_global_rounds * 0.1
+    warmup_rounds = num_global_rounds * 0.15
 
     data_path = './data'
 
