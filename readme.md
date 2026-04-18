@@ -19,8 +19,10 @@
 **2026.4.8**
 1、针对MNIST和CIFAR的仿真参数修改完成
 **2026.4.11**
-1、参考CIFAR，更换VGG11,VGG13,VGG17,VGG19 //TODO
-2、找别的基线 //TODO
+1、参考CIFAR，更换VGG11,VGG13,VGG17,VGG19
+2、跑8到10张图   //TODO
 3、优化问题  //TODO
 4、过代码，加注释   //TODO
+**2026.4.18**
+1、完成CIFAR的模型变更
 

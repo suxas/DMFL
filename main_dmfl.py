@@ -95,7 +95,9 @@ def run_dmfl(skip_train_eval=False):
             valid_grads = []
 
             times = [sum(c.simulate_physical_conditions(param_dim)[:2]) for c in server.clients]
-            t_win = min(args.t_deadline, sorted(times)[max(2, int(len(server.clients) * 0.5)) - 1])
+            survival_rate = 1.0 - args.target_straggler_rate
+            k_min_idx = max(1, int(len(server.clients) * survival_rate)) - 1
+            t_win = min(args.t_deadline, sorted(times)[k_min_idx])
 
             for i, client in enumerate(server.clients):
                 if times[i] <= t_win:
