@@ -5,10 +5,9 @@ import matplotlib.pyplot as plt
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
-import random      # 新增
-import numpy as np # 新增
+import random
+import numpy as np
 
-# 固定随机种子的函数
 def set_seed(seed=42):
     random.seed(seed)
     np.random.seed(seed)
@@ -16,16 +15,13 @@ def set_seed(seed=42):
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
-    # 强制 cuDNN 使用确定性算法
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-
-set_seed(42)
 
 
 from config import args
 from dataset import get_dataset, split_data
-from models.network import SimpleCNN, CNNCifar,VGG11CIFAR,VGG13CIFAR,VGG16CIFAR,VGG19CIFAR
+from models.network import SimpleCNN, CNNCifar, VGG11CIFAR, VGG13CIFAR, VGG16CIFAR, VGG19CIFAR
 from models.diffusion import GradientDiffusion
 from utils import flatten_params, unflatten_params
 from nodes.client import LocalClient
@@ -41,7 +37,7 @@ class EdgeState:
 
         self.hist_grads = {i: torch.zeros(param_dim).to(args.device) for i in range(num_clients)}
         self.buf_hist, self.buf_targ = [], []
-        self.max_buf = num_clients * 5  # 经验池数量
+        self.max_buf = num_clients * 5
 
 
 def evaluate(model, dataset):
@@ -59,6 +55,9 @@ def evaluate(model, dataset):
 
 
 def run_dmfl(skip_train_eval=False):
+    # 🌟 【核心修复】：在每次运行算法的最开始，强制同步随机数宇宙！
+    set_seed(42)
+
     print("\n>>> 正在进行仿真: Method = DMFL")
     train_data, test_data = get_dataset()
     user_groups = split_data(train_data, args.num_users)
@@ -90,16 +89,18 @@ def run_dmfl(skip_train_eval=False):
         edge_grads = []
         edge_weights = []
 
-        for server in edge_servers:
-            state = states[server.id]
+        for edge_server in edge_servers:
+            state = states[edge_server.id]
             valid_grads = []
 
-            times = [sum(c.simulate_physical_conditions(param_dim)[:2]) for c in server.clients]
+            times = [sum(c.simulate_physical_conditions(param_dim)[:2]) for c in edge_server.clients]
+
+            # 使用您提供的完全一致的计算公式
             survival_rate = 1.0 - args.target_straggler_rate
-            k_min_idx = max(1, int(len(server.clients) * survival_rate)) - 1
+            k_min_idx = max(1, int(len(edge_server.clients) * survival_rate)) - 1
             t_win = min(args.t_deadline, sorted(times)[k_min_idx])
 
-            for i, client in enumerate(server.clients):
+            for i, client in enumerate(edge_server.clients):
                 if times[i] <= t_win:
                     grad = client.train(global_weights)
                     valid_grads.append(grad)
@@ -118,7 +119,7 @@ def run_dmfl(skip_train_eval=False):
 
                         norm_d, norm_b = torch.norm(delta), torch.norm(head_hist)
                         if norm_d > norm_b:
-                            delta = delta * (norm_b / (norm_d + 1e-6)) * 0.8  # MNIST情况下要*0.5，CIFAR*0.8
+                            delta = delta * (norm_b / (norm_d + 1e-6)) * 0.8
 
                         base_grad[-state.diff_dim:] += delta
                         valid_grads.append(base_grad)
@@ -131,7 +132,7 @@ def run_dmfl(skip_train_eval=False):
                 loader = DataLoader(dataset, batch_size=32, shuffle=True)
 
                 state.diffusion.train()
-                for _ in range(10):  # 扩撒模型训练次数
+                for _ in range(10):
                     for targ, hist in loader:
                         loss = state.diffusion.train_step(targ, hist)
                         state.optimizer.zero_grad()
@@ -145,6 +146,7 @@ def run_dmfl(skip_train_eval=False):
         if edge_grads:
             total_grad_sum = sum(edge_grads)
             total_weights = sum(edge_weights)
+
             global_grad = total_grad_sum / total_weights
             unflatten_params(global_model, flatten_params(global_model) - global_grad)
 
@@ -163,39 +165,11 @@ def run_dmfl(skip_train_eval=False):
         pbar.set_postfix({'Val Acc': f"{acc_v:.2f}%", 'Val Loss': f"{loss_v:.4f}"})
 
         # 学习率衰减
-        #if epoch == int(args.num_global_rounds * 0.5) or epoch == int(args.num_global_rounds * 0.75):
-        #    args.lr *= 0.1
+        if epoch == int(args.num_global_rounds * 0.5) or epoch == int(args.num_global_rounds * 0.75):
+            args.lr *= 0.1
 
     return t_acc, t_loss, v_acc, v_loss
 
 
 if __name__ == '__main__':
-    t_acc, t_loss, v_acc, v_loss = run_dmfl(skip_train_eval=False)
-    epochs = range(1, args.num_global_rounds + 1)
-    ms = 2
-
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-
-    axes[0].plot(epochs, t_acc, 'b--o', markersize=ms, label='Train Accuracy')
-    axes[0].plot(epochs, v_acc, 'r-^', markersize=ms, label='Validation Accuracy')
-    if args.warmup_rounds > 0:
-        axes[0].axvline(x=args.warmup_rounds, color='gray', linestyle=':', label='Warm-up End')
-    axes[0].set_title(f'DMFL ({args.dataset_name.upper()}): Accuracy')
-    axes[0].set_xlabel('Global Communication Rounds')
-    axes[0].set_ylabel('Accuracy (%)')
-    axes[0].legend()
-    axes[0].grid(True)
-
-    axes[1].plot(epochs, t_loss, 'b--o', markersize=ms, label='Train Loss')
-    axes[1].plot(epochs, v_loss, 'r-^', markersize=ms, label='Validation Loss')
-    if args.warmup_rounds > 0:
-        axes[1].axvline(x=args.warmup_rounds, color='gray', linestyle=':', label='Warm-up End')
-    axes[1].set_title(f'DMFL ({args.dataset_name.upper()}): Loss')
-    axes[1].set_xlabel('Global Communication Rounds')
-    axes[1].set_ylabel('Loss')
-    axes[1].legend()
-    axes[1].grid(True)
-
-    plt.tight_layout()
-
-    plt.show()
+    pass

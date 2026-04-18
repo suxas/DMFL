@@ -1,6 +1,7 @@
 import torch
 import sys
 import numpy as np
+import random
 import matplotlib.pyplot as plt
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -12,6 +13,17 @@ from models.network import SimpleCNN, CNNCifar, VGG11CIFAR, VGG13CIFAR, VGG16CIF
 from utils import flatten_params, unflatten_params
 from nodes.client import LocalClient
 from nodes.edge import EdgeServer
+
+# 🌟 【修复】：定义固定随机种子的函数
+def set_seed(seed=42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 def get_salf_partial_grad(model, full_grad_vec):
@@ -27,7 +39,6 @@ def get_salf_partial_grad(model, full_grad_vec):
     if num_zeros > 0:
         salf_grad_vec[:num_zeros] = 0.0
 
-    # 彻底去掉多余的 mask_vec 优化
     return salf_grad_vec
 
 
@@ -46,6 +57,8 @@ def evaluate_model(model, dataset):
 
 
 def run_salf(skip_train_eval=False):
+    set_seed(42)
+
     print(f"\n>>> 正在进行仿真: Method = SALF ({args.dataset_name.upper()})")
     train_data, test_data = get_dataset()
     user_groups = split_data(train_data, args.num_users)
@@ -71,29 +84,25 @@ def run_salf(skip_train_eval=False):
         global_weights = global_model.state_dict()
 
         edge_grads = []
-        edge_weights = []  # 恢复为 weights，记录总客户端数量，去掉 mask
+        edge_weights = []
 
         for edge_server in edge_servers:
             valid_grads = []
 
             client_conditions = [client.simulate_physical_conditions(param_dim) for client in edge_server.clients]
-            total_times = [c[0] + c[1] for c in client_conditions]
+            times = [c[0] + c[1] for c in client_conditions]
 
-            # 根据 config 中的掉队率动态计算存活阈值
-            # 存活率 = 1 - 掉队率。max(1, ...) 确保极端网络下至少有一个节点存活
             survival_rate = 1.0 - args.target_straggler_rate
-            K_min = max(1, int(len(edge_server.clients) * survival_rate))
-            sorted_times = sorted(total_times)
-            dynamic_t_win = min(args.t_deadline, sorted_times[K_min - 1])
+            k_min_idx = max(1, int(len(edge_server.clients) * survival_rate)) - 1
+            t_win = min(args.t_deadline, sorted(times)[k_min_idx])
 
             for local_idx, client in enumerate(edge_server.clients):
                 t_train, t_up = client_conditions[local_idx][:2]
                 full_grad = client.train(global_weights)
 
-                if (t_train + t_up) <= dynamic_t_win:
+                if (t_train + t_up) <= t_win:
                     valid_grads.append(full_grad)
                 else:
-                    # 获取原版 SALF 部分梯度
                     partial_grad = get_salf_partial_grad(global_model, full_grad)
                     valid_grads.append(partial_grad)
 
@@ -104,9 +113,6 @@ def run_salf(skip_train_eval=False):
         if edge_grads:
             total_grad_sum = sum(edge_grads)
             total_weights = sum(edge_weights)
-
-            # 【对齐 GitHub 原版】：不看有效层数，强制除以本轮参与的所有客户端总数 (total_weights)
-            # 这会导致丢弃较多的浅层网络梯度严重缩水，这是原版 SALF 的真实特性
             global_grad = total_grad_sum / total_weights
             unflatten_params(global_model, flatten_params(global_model) - global_grad)
 
@@ -125,39 +131,10 @@ def run_salf(skip_train_eval=False):
         pbar.set_postfix({'Val Acc': f"{val_acc:.2f}%", 'Val Loss': f"{val_loss:.4f}"})
 
         # 学习率衰减
-        # if epoch == int(args.num_global_rounds * 0.5) or epoch == int(args.num_global_rounds * 0.75):
-        #   args.lr *= 0.1
+        if epoch == int(args.num_global_rounds * 0.5) or epoch == int(args.num_global_rounds * 0.75):
+            args.lr *= 0.1
 
     return t_acc_hist, t_loss_hist, v_acc_hist, v_loss_hist
 
-
 if __name__ == '__main__':
-    t_acc, t_loss, v_acc, v_loss = run_salf(skip_train_eval=False)
-    epochs = range(1, args.num_global_rounds + 1)
-    ms = 3
-
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-
-    axes[0].plot(epochs, t_acc, 'b--o', markersize=ms, label='Train Accuracy')
-    axes[0].plot(epochs, v_acc, 'r-^', markersize=ms, label='Validation Accuracy')
-    if args.warmup_rounds > 0:
-        axes[0].axvline(x=args.warmup_rounds, color='gray', linestyle=':', label='Warm-up End')
-    axes[0].set_title(f'SALF ({args.dataset_name.upper()}): Accuracy')
-    axes[0].set_xlabel('Global Communication Rounds')
-    axes[0].set_ylabel('Accuracy (%)')
-    axes[0].legend()
-    axes[0].grid(True)
-
-    axes[1].plot(epochs, t_loss, 'b--o', markersize=ms, label='Train Loss')
-    axes[1].plot(epochs, v_loss, 'r-^', markersize=ms, label='Validation Loss')
-    if args.warmup_rounds > 0:
-        axes[1].axvline(x=args.warmup_rounds, color='gray', linestyle=':', label='Warm-up End')
-    axes[1].set_title(f'SALF ({args.dataset_name.upper()}): Loss')
-    axes[1].set_xlabel('Global Communication Rounds')
-    axes[1].set_ylabel('Loss')
-    axes[1].legend()
-    axes[1].grid(True)
-
-    plt.tight_layout()
-
-    plt.show()
+    pass

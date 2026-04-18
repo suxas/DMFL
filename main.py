@@ -11,8 +11,19 @@ from main_salf import run_salf
 from main_dmfl import run_dmfl
 
 if __name__ == '__main__':
+    # 🌟 【修复】：记录初始学习率，防止串行污染
+    original_lr = args.lr
+
+    # 1. 运行 FedAvg
+    args.lr = original_lr
     _, _, v_acc_base, v_loss_base = run_fedavg(skip_train_eval=True)
+
+    # 2. 运行 SALF
+    args.lr = original_lr  # 强制重置
     _, _, v_acc_salf, v_loss_salf = run_salf(skip_train_eval=True)
+
+    # 3. 运行 DMFL
+    args.lr = original_lr  # 强制重置
     _, _, v_acc_dmfl, v_loss_dmfl = run_dmfl(skip_train_eval=True)
 
     epochs = range(1, args.num_global_rounds + 1)
