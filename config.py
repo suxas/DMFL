@@ -30,7 +30,7 @@ class Config:
     cycles_per_sample = 2e4
 
     # 掉队率与物理死线
-    target_straggler_rate = 0.7
+    target_straggler_rate = 0.5
     t_deadline = 99999.0
     noise_scale = 0.001
 
@@ -38,7 +38,7 @@ class Config:
     diff_timesteps = 50
     diff_hidden_dim = 1024
     diff_lr = 0.001
-    warmup_rounds = num_global_rounds * 0.15
+    warmup_rounds = num_global_rounds * 0.2
 
     data_path = './data'
 

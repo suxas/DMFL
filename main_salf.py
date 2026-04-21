@@ -131,10 +131,41 @@ def run_salf(skip_train_eval=False):
         pbar.set_postfix({'Val Acc': f"{val_acc:.2f}%", 'Val Loss': f"{val_loss:.4f}"})
 
         # 学习率衰减
-        if epoch == int(args.num_global_rounds * 0.5) or epoch == int(args.num_global_rounds * 0.75):
-            args.lr *= 0.1
+        # if epoch == int(args.num_global_rounds * 0.5) or epoch == int(args.num_global_rounds * 0.75):
+        #    args.lr *= 0.1
 
     return t_acc_hist, t_loss_hist, v_acc_hist, v_loss_hist
 
 if __name__ == '__main__':
-    pass
+    # 独立运行时，默认计算训练集 (skip_train_eval=False)
+    t_acc, t_loss, v_acc, v_loss = run_salf(skip_train_eval=False)
+    epochs = range(1, args.num_global_rounds + 1)
+    ms = 3  # 缩小描点体积
+
+    # 绘制独立运行时的 Train vs Validation 对比图
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    # 精度图
+    axes[0].plot(epochs, t_acc, 'b--o', markersize=ms, label='Train Accuracy')
+    axes[0].plot(epochs, v_acc, 'r-^', markersize=ms, label='Validation Accuracy')
+    if args.warmup_rounds > 0:
+        axes[0].axvline(x=args.warmup_rounds, color='gray', linestyle=':', label='Warm-up End')
+    axes[0].set_title(f'SALF ({args.dataset_name.upper()}): Accuracy')
+    axes[0].set_xlabel('Global Communication Rounds')
+    axes[0].set_ylabel('Accuracy (%)')
+    axes[0].legend()
+    axes[0].grid(True)
+
+    # Loss图
+    axes[1].plot(epochs, t_loss, 'b--o', markersize=ms, label='Train Loss')
+    axes[1].plot(epochs, v_loss, 'r-^', markersize=ms, label='Validation Loss')
+    if args.warmup_rounds > 0:
+        axes[1].axvline(x=args.warmup_rounds, color='gray', linestyle=':', label='Warm-up End')
+    axes[1].set_title(f'SALF ({args.dataset_name.upper()}): Loss')
+    axes[1].set_xlabel('Global Communication Rounds')
+    axes[1].set_ylabel('Loss')
+    axes[1].legend()
+    axes[1].grid(True)
+
+    plt.tight_layout()
+    plt.show()
