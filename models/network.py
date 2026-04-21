@@ -7,12 +7,15 @@ class SimpleCNN(nn.Module):
     """
     基于 SALF 论文中的 CNN2Layer 结构，用于 MNIST
     """
+
     def __init__(self, in_channels=1, output_size=10, data='mnist', kernel_size=5, intemidiate_size_1=6,
                  intemidiate_size_2=50):
         super(SimpleCNN, self).__init__()
         self.intemidiate_size_1 = intemidiate_size_1
         self.data = data
-        self.data_size = 32
+
+        # 🌟 【修复】：根据数据集动态设置初始图像大小，MNIST为28，CIFAR为32
+        self.data_size = 28
 
         self.conv1 = nn.Conv2d(in_channels=in_channels, out_channels=intemidiate_size_1, kernel_size=kernel_size)
         self.data_size = (self.data_size - kernel_size + 1) / 2
