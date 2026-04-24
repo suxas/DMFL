@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from config import args
 from dataset import get_dataset, split_data
-from models.network import SimpleCNN, CNNCifar,VGG11CIFAR,VGG13CIFAR,VGG16CIFAR,VGG19CIFAR
+from models.network import SimpleCNN, CNNCifar, VGG11CIFAR, VGG13CIFAR, VGG16CIFAR, VGG19CIFAR
 from utils import flatten_params, unflatten_params
 from nodes.client import LocalClient
 from nodes.edge import EdgeServer
@@ -66,7 +66,6 @@ def run_fedavg(skip_train_eval=False):
         global_weights = global_model.state_dict()
 
         edge_grads = []
-        edge_weights = []  # 记录有效客户端的数量进行加权
 
         for edge_server in edge_servers:
             valid_grads = []
@@ -84,14 +83,10 @@ def run_fedavg(skip_train_eval=False):
                     valid_grads.append(client.train(global_weights))
 
             if valid_grads:
-                edge_grads.append(torch.stack(valid_grads).sum(dim=0))  # 边缘改为求和
-                edge_weights.append(len(valid_grads))
-
+                edge_grads.append(torch.stack(valid_grads).sum(dim=0))
         if edge_grads:
-            #根据全网的有效客户端数量进行加权平均
             total_grad_sum = sum(edge_grads)
-            total_weights = sum(edge_weights)
-            global_grad = total_grad_sum / total_weights
+            global_grad = total_grad_sum / float(args.num_users)
             unflatten_params(global_model, flatten_params(global_model) - global_grad)
 
         val_acc, val_loss = evaluate_model(global_model, test_data)
@@ -108,14 +103,13 @@ def run_fedavg(skip_train_eval=False):
 
         pbar.set_postfix({'Val Acc': f"{val_acc:.2f}%", 'Val Loss': f"{val_loss:.4f}"})
 
-        # 解开学习率衰减注释，防止后期震荡
         # if epoch == int(args.num_global_rounds * 0.5) or epoch == int(args.num_global_rounds * 0.75):
         #   args.lr *= 0.1
 
     return t_acc_hist, t_loss_hist, v_acc_hist, v_loss_hist
 
 
-# 🌟 添加绘图辅助函数（放在 if __name__ == '__main__': 上方即可）
+# 🌟 绘图辅助函数
 def plot_with_shadow(ax, x, y, color, label, window=20):
     import numpy as np
     y_arr = np.array(y)
@@ -132,15 +126,12 @@ def plot_with_shadow(ax, x, y, color, label, window=20):
 
 
 if __name__ == '__main__':
-    # 注意：在不同文件里把 run_xxx 改成本文件的函数名（run_dmfl / run_fedavg / run_salf）
-    # 以下以 run_dmfl 为例，若是其他文件请自行修改为对应的运行函数
     t_acc, t_loss, v_acc, v_loss = (run_fedavg(skip_train_eval=False))
 
     epochs = range(1, args.num_global_rounds + 1)
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
-    # 精度图
     plot_with_shadow(axes[0], epochs, t_acc, 'blue', 'Train Accuracy')
     plot_with_shadow(axes[0], epochs, v_acc, 'red', 'Validation Accuracy')
     if args.warmup_rounds > 0:
@@ -151,7 +142,6 @@ if __name__ == '__main__':
     axes[0].legend()
     axes[0].grid(True)
 
-    # Loss 图
     plot_with_shadow(axes[1], epochs, t_loss, 'blue', 'Train Loss')
     plot_with_shadow(axes[1], epochs, v_loss, 'red', 'Validation Loss')
     if args.warmup_rounds > 0:

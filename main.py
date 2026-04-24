@@ -28,7 +28,7 @@ def plot_with_shadow(ax, x, y, color, label, window=20):
         y_std[i] = np.std(y_arr[start:end])
 
     # 绘制平滑主线
-    ax.plot(x, y_mean, color=color, linestyle='-', label=label, linewidth=2.0)
+    ax.plot(x, y_mean, color=color, linestyle='-', marker='o', markersize=2, label=label, linewidth=2.0)
     # 绘制波动阴影 (上下一个标准差)
     ax.fill_between(x, y_mean - y_std, y_mean + y_std, color=color, alpha=0.2)
 
@@ -60,7 +60,7 @@ if __name__ == '__main__':
         plt.axvline(x=args.warmup_rounds, color='gray', linestyle=':', label='Warm-up End')
     plt.xlabel('Global Communication Rounds')
     plt.ylabel('Validation Accuracy (%)')
-    plt.title('Validation Accuracy Comparison (Smoothed w/ Variance Shadow)')
+    plt.title('Accuracy Comparison')
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
@@ -76,7 +76,7 @@ if __name__ == '__main__':
         plt.axvline(x=args.warmup_rounds, color='gray', linestyle=':', label='Warm-up End')
     plt.xlabel('Global Communication Rounds')
     plt.ylabel('Validation Loss')
-    plt.title('Validation Loss Comparison (Smoothed w/ Variance Shadow)')
+    plt.title('Loss Comparison')
     plt.legend()
     plt.grid(True)
     plt.tight_layout()

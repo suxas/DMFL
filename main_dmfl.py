@@ -8,6 +8,7 @@ from tqdm import tqdm
 import random
 import numpy as np
 
+
 def set_seed(seed=42):
     random.seed(seed)
     np.random.seed(seed)
@@ -57,7 +58,7 @@ def evaluate(model, dataset):
 def run_dmfl(skip_train_eval=False):
     set_seed(42)
 
-    print("\n>>> 正在进行仿真: Method = DMFL")
+    print("\n>>> 正在进行仿真: Method = DMFL (基于先验 IID 比例的层级异构重建机制)")
     train_data, test_data = get_dataset()
     user_groups = split_data(train_data, args.num_users)
 
@@ -86,50 +87,81 @@ def run_dmfl(skip_train_eval=False):
         global_weights = global_model.state_dict()
 
         edge_grads = []
-        edge_weights = []
 
         for edge_server in edge_servers:
             state = states[edge_server.id]
-            valid_grads = []
+
+            # 分离存活者和掉队者的索引
+            active_grads = []
+            straggler_indices = []
 
             times = [sum(c.simulate_physical_conditions(param_dim)[:2]) for c in edge_server.clients]
-
-            # 使用您提供的完全一致的计算公式
             survival_rate = 1.0 - args.target_straggler_rate
             k_min_idx = max(1, int(len(edge_server.clients) * survival_rate)) - 1
             t_win = min(args.t_deadline, sorted(times)[k_min_idx])
 
+            # 1. 优先收集本轮成功上传的客户端真实梯度
             for i, client in enumerate(edge_server.clients):
                 if times[i] <= t_win:
                     grad = client.train(global_weights)
-                    valid_grads.append(grad)
+                    active_grads.append(grad)
 
+                    # 更新历史经验池用于训练扩散模型
                     if torch.norm(state.hist_grads[i]) > 0:
                         head_curr, head_hist = grad[-state.diff_dim:], state.hist_grads[i][-state.diff_dim:]
                         state.buf_hist.append(head_hist.detach().clone())
                         state.buf_targ.append((head_curr - head_hist).detach().clone())
                     state.hist_grads[i] = grad.detach().clone()
+                else:
+                    straggler_indices.append(i)
 
-                elif epoch > args.warmup_rounds:
-                    base_grad = state.hist_grads[i].clone()
-                    if torch.norm(base_grad) > 0:
-                        head_hist = base_grad[-state.diff_dim:].unsqueeze(0)
-                        delta = state.diffusion.generate(head_hist).squeeze(0)
+            # 2. 计算本轮簇内其他客户端的识别层（特征提取器）平均梯度
+            if len(active_grads) > 0:
+                avg_active_feat = torch.stack([g[:-diff_dim] for g in active_grads]).mean(dim=0)
+            else:
+                avg_active_feat = torch.zeros(param_dim - diff_dim).to(args.device)
 
-                        norm_d, norm_b = torch.norm(delta), torch.norm(head_hist)
-                        if norm_d > norm_b:
-                            delta = delta * (norm_b / (norm_d + 1e-6)) * 0.8
+            # 3. 开始重建掉队者，并组装全簇的梯度集合
+            edge_all_grads = list(active_grads)  # 首先把真实梯度放进大池子
 
-                        base_grad[-state.diff_dim:] += delta
-                        valid_grads.append(base_grad)
+            for i in straggler_indices:
+                base_grad = state.hist_grads[i].clone()
 
+                # 如果度过了预热期，且该掉队者有过历史记录，则进行高级伪造
+                if epoch > args.warmup_rounds and torch.norm(base_grad) > 0:
+
+                    # --- A. 分类头：使用扩散模型预测 ---
+                    head_hist = base_grad[-diff_dim:].unsqueeze(0)
+                    delta = state.diffusion.generate(head_hist).squeeze(0)
+                    norm_d, norm_b = torch.norm(delta), torch.norm(head_hist)
+                    if norm_d > norm_b:
+                        delta = delta * (norm_b / (norm_d + 1e-6)) * 0.8
+                    fake_head = base_grad[-diff_dim:] + delta
+
+                    # --- B. 识别层：通过 IID 程度进行插值混合 ---
+                    hist_feat = base_grad[:-diff_dim]
+                    iid_deg = args.inner_client_iid
+
+                    # 只有当簇内有存活者时，才能混合；否则 100% 相信历史
+                    if len(active_grads) > 0:
+                        fake_feat = (iid_deg * avg_active_feat) + ((1.0 - iid_deg) * hist_feat)
+                    else:
+                        fake_feat = hist_feat
+
+                    # --- C. 拼接并加入全簇大池子 ---
+                    fake_grad = torch.cat([fake_feat, fake_head])
+                    edge_all_grads.append(fake_grad)
+
+                else:
+                    # 如果在预热期，直接用历史梯度垫底 (如果没有历史记录，base_grad 本身就是全 0)
+                    edge_all_grads.append(base_grad)
+
+            # 扩散模型训练 (逻辑不变)
             if state.buf_hist:
                 state.buf_hist = state.buf_hist[-state.max_buf:]
                 state.buf_targ = state.buf_targ[-state.max_buf:]
-
                 dataset = TensorDataset(torch.stack(state.buf_targ), torch.stack(state.buf_hist))
                 loader = DataLoader(dataset, batch_size=32, shuffle=True)
-
                 state.diffusion.train()
                 for _ in range(10):
                     for targ, hist in loader:
@@ -138,15 +170,15 @@ def run_dmfl(skip_train_eval=False):
                         loss.backward()
                         state.optimizer.step()
 
-            if valid_grads:
-                edge_grads.append(torch.stack(valid_grads).sum(dim=0))
-                edge_weights.append(len(valid_grads))
+            # 4. 小基站内聚合：直接将全簇 (存活+重建) 梯度求和
+            if len(edge_all_grads) > 0:
+                server_grad_sum = torch.stack(edge_all_grads).sum(dim=0)
+                edge_grads.append(server_grad_sum)
 
         if edge_grads:
+            # 5. 大基站聚合：严格使用“全网所有客户端数量”作为分母
             total_grad_sum = sum(edge_grads)
-            total_weights = sum(edge_weights)
-
-            global_grad = total_grad_sum / total_weights
+            global_grad = total_grad_sum / float(args.num_users)
             unflatten_params(global_model, flatten_params(global_model) - global_grad)
 
         acc_v, loss_v = evaluate(global_model, test_data)
@@ -163,14 +195,12 @@ def run_dmfl(skip_train_eval=False):
 
         pbar.set_postfix({'Val Acc': f"{acc_v:.2f}%", 'Val Loss': f"{loss_v:.4f}"})
 
-        # 学习率衰减
         # if epoch == int(args.num_global_rounds * 0.5) or epoch == int(args.num_global_rounds * 0.75):
-        #     args.lr *= 0.1
+        # args.lr *= 0.1
 
     return t_acc, t_loss, v_acc, v_loss
 
 
-# 🌟 添加绘图辅助函数（放在 if __name__ == '__main__': 上方即可）
 def plot_with_shadow(ax, x, y, color, label, window=20):
     import numpy as np
     y_arr = np.array(y)
@@ -187,9 +217,7 @@ def plot_with_shadow(ax, x, y, color, label, window=20):
 
 
 if __name__ == '__main__':
-    # 注意：在不同文件里把 run_xxx 改成本文件的函数名（run_dmfl / run_fedavg / run_salf）
-    # 以下以 run_dmfl 为例，若是其他文件请自行修改为对应的运行函数
-    t_acc, t_loss, v_acc, v_loss = run_dmfl(skip_train_eval=False)
+    t_acc, t_loss, v_acc, v_loss = (run_dmfl(skip_train_eval=False))
 
     epochs = range(1, args.num_global_rounds + 1)
 
