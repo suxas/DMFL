@@ -1,5 +1,9 @@
 import matplotlib.pyplot as plt
+import torch
+
 from config import args
+print(f"CUDA 是否可用: {torch.cuda.is_available()}")
+print(f"当前分配的设备: {args.device}")
 
 # 从各个独立脚本导入仿真运行函数
 from main_fedavg import run_fedavg
@@ -7,12 +11,23 @@ from main_salf import run_salf
 from main_dmfl import run_dmfl
 
 if __name__ == '__main__':
+    # 🌟 【修复】：记录初始学习率，防止串行污染
+    original_lr = args.lr
+
+    # 1. 运行 FedAvg
+    args.lr = original_lr
     _, _, v_acc_base, v_loss_base = run_fedavg(skip_train_eval=True)
+
+    # 2. 运行 SALF
+    args.lr = original_lr  # 强制重置
     _, _, v_acc_salf, v_loss_salf = run_salf(skip_train_eval=True)
+
+    # 3. 运行 DMFL
+    args.lr = original_lr  # 强制重置
     _, _, v_acc_dmfl, v_loss_dmfl = run_dmfl(skip_train_eval=True)
 
     epochs = range(1, args.num_global_rounds + 1)
-    ms = 2  # 描点体积
+    ms = 2
 
     # ================= 图1: 验证集精度 =================
     plt.figure(1, figsize=(8, 6))
@@ -28,6 +43,9 @@ if __name__ == '__main__':
     plt.grid(True)
     plt.tight_layout()
 
+    acc_filename = f"Results_Accuracy_{args.dataset_name}_Rounds{args.num_global_rounds}.png"
+    plt.savefig(acc_filename, dpi=300, bbox_inches='tight')
+
     # ================= 图2: 验证集 Loss =================
     plt.figure(2, figsize=(8, 6))
     plt.plot(epochs, v_loss_base, 'r--o', markersize=ms, label='FedAvg')
@@ -41,5 +59,8 @@ if __name__ == '__main__':
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
+
+    loss_filename = f"Results_Loss_{args.dataset_name}_Rounds{args.num_global_rounds}.png"
+    plt.savefig(loss_filename, dpi=300, bbox_inches='tight')
 
     plt.show()
