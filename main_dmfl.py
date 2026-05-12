@@ -221,60 +221,69 @@ def run_dmfl(use_optimizer=True, skip_train_eval=False):
     return t_acc, t_loss, v_acc, v_loss, history_avg_P_UE, history_avg_T_win
 
 
+# ... [保留原本所有的 DMFL 训练逻辑，从开头直到 run_dmfl 函数结束] ...
+
 if __name__ == '__main__':
-    print("==========================================================")
-    print("  实验一：运行【带 CR-SQP 优化器 (精度优先+能耗感知)】")
-    print("==========================================================")
+    print("  实验一：运行【带 CR-SQP 优化器】")
     res_opt = run_dmfl(use_optimizer=True, skip_train_eval=True)
     _, _, v_acc_opt, v_loss_opt, hist_P_opt, hist_T_opt = res_opt
 
-    print("\n==========================================================")
-    print("  实验二：运行【无优化器 (基线:满功率+硬截断)】")
-    print("==========================================================")
+    print("  实验二：运行【无优化器】")
     res_base = run_dmfl(use_optimizer=False, skip_train_eval=True)
     _, _, v_acc_base, v_loss_base, hist_P_base, hist_T_base = res_base
 
-    # ==========================================================
-    # 绘制对比消融实验图表
-    # ==========================================================
     epochs = range(1, args.num_global_rounds + 1)
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
-    # --- 图 1：Accuracy 精度对比 ---
-    axes[0].plot(epochs, v_acc_base, color='#d62728', linestyle='--', label='Baseline (No Optimizer)')
-    axes[0].plot(epochs, v_acc_opt, color='#2ca02c', linestyle='-', label='DMFL + CR-SQP')
+    # 图 1：Accuracy 和 Loss 对比 (1x2 子图)
+    fig1, axes1 = plt.subplots(1, 2, figsize=(14, 6))
+
+    # 子图 1: Accuracy
+    axes1[0].plot(epochs, v_acc_base, color='#d62728', linestyle='--', label='Baseline (No Optimizer)')
+    axes1[0].plot(epochs, v_acc_opt, color='#2ca02c', linestyle='-', label='DMFL + CR-SQP')
     if args.warmup_rounds > 0:
-        axes[0].axvline(x=args.warmup_rounds, color='gray', linestyle=':', label='Warm-up End')
-    axes[0].set_title(f'Test Accuracy Comparison ({args.dataset_name.upper()})')
-    axes[0].set_xlabel('Global Communication Rounds')
-    axes[0].set_ylabel('Accuracy (%)')
-    axes[0].legend()
-    axes[0].grid(True, linestyle='--', alpha=0.6)
+        axes1[0].axvline(x=args.warmup_rounds, color='gray', linestyle=':', label='Warm-up End')
+    axes1[0].set_title(f'Test Accuracy Comparison ({args.dataset_name.upper()})')
+    axes1[0].set_xlabel('Global Communication Rounds')
+    axes1[0].set_ylabel('Accuracy (%)')
+    axes1[0].legend()
+    axes1[0].grid(True, linestyle='--', alpha=0.6)
 
-    # --- 图 2：Loss 损失对比 ---
-    axes[1].plot(epochs, v_loss_base, color='#d62728', linestyle='--', label='Baseline (No Optimizer)')
-    axes[1].plot(epochs, v_loss_opt, color='#2ca02c', linestyle='-', label='DMFL + CR-SQP')
+    # 子图 2: Loss
+    axes1[1].plot(epochs, v_loss_base, color='#d62728', linestyle='--', label='Baseline (No Optimizer)')
+    axes1[1].plot(epochs, v_loss_opt, color='#2ca02c', linestyle='-', label='DMFL + CR-SQP')
     if args.warmup_rounds > 0:
-        axes[1].axvline(x=args.warmup_rounds, color='gray', linestyle=':', label='Warm-up End')
-    axes[1].set_title('Test Loss Comparison')
-    axes[1].set_xlabel('Global Communication Rounds')
-    axes[1].set_ylabel('Loss')
-    axes[1].legend()
-    axes[1].grid(True, linestyle='--', alpha=0.6)
+        axes1[1].axvline(x=args.warmup_rounds, color='gray', linestyle=':', label='Warm-up End')
+    axes1[1].set_title('Test Loss Comparison')
+    axes1[1].set_xlabel('Global Communication Rounds')
+    axes1[1].set_ylabel('Loss')
+    axes1[1].legend()
+    axes1[1].grid(True, linestyle='--', alpha=0.6)
 
-    # --- 图 3：CR-SQP 动态资源分配轨迹 (双Y轴) ---
+    fig1.tight_layout()
+    plt.show(block=False)  # 保持窗口开启，继续绘制下一张图
+
+    # 图 2：物理资源分配动态轨迹 (双 Y 轴单图)
+    fig2, ax_p = plt.subplots(figsize=(10, 6))
+
     color_p = '#1f77b4'
-    axes[2].set_xlabel('Global Communication Rounds')
-    axes[2].set_ylabel('Avg Allocation Power (W)', color=color_p)
-    axes[2].plot(epochs, hist_P_opt, color=color_p, linestyle='-', marker='o', markersize=3, label='P_UE (W)')
-    axes[2].tick_params(axis='y', labelcolor=color_p)
+    ax_p.set_xlabel('Global Communication Rounds', fontsize=11)
+    ax_p.set_ylabel('Avg Allocation Power (W)', color=color_p, fontsize=11)
+    ax_p.plot(epochs, hist_P_opt, color=color_p, linestyle='-', marker='o', markersize=3, label='P_UE (W)')
+    ax_p.tick_params(axis='y', labelcolor=color_p)
+    ax_p.grid(True, linestyle='--', alpha=0.4)
 
-    ax3_twin = axes[2].twinx()
+    # 创建双 Y 轴
+    ax_t = ax_p.twinx()
     color_t = '#ff7f0e'
-    ax3_twin.set_ylabel('Avg Time Window (s)', color=color_t)
-    ax3_twin.plot(epochs, hist_T_opt, color=color_t, linestyle='--', marker='^', markersize=3, label='T_win (s)')
-    ax3_twin.tick_params(axis='y', labelcolor=color_t)
-    axes[2].set_title('CR-SQP Resource Allocation (Energy & Accuracy Aware)')
+    ax_t.set_ylabel('Avg Time Window (s)', color=color_t, fontsize=11)
+    ax_t.plot(epochs, hist_T_opt, color=color_t, linestyle='-', marker='^', markersize=3, label='T_win (s)')
+    ax_t.tick_params(axis='y', labelcolor=color_t)
 
-    fig.tight_layout()
+    # 合并两个轴的图例
+    lines_1, labels_1 = ax_p.get_legend_handles_labels()
+    lines_2, labels_2 = ax_t.get_legend_handles_labels()
+    ax_p.legend(lines_1 + lines_2, labels_1 + labels_2, loc='upper right')
+
+    plt.title('CR-SQP Dynamic Resource Allocation Trajectory', fontsize=12)
+    fig2.tight_layout()
     plt.show()
