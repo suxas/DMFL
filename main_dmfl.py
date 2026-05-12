@@ -9,7 +9,7 @@ import random
 import numpy as np
 
 
-def set_seed(seed=42):
+def set_seed(seed=114514):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
