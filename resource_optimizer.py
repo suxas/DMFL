@@ -19,12 +19,10 @@ class DMFL_ResourceOptimizer(nn.Module):
         self.S_omega = param_dim * 32
 
         self.Delta_diff_sq = getattr(args, 'delta_diff_sq', 0.05)
-        self.rho_energy = 0.2  # 能耗惩罚权重：促使功率下降
+        self.rho_energy = 0.5  # 能耗惩罚权重：促使功率下降
         self.rho_time = 0.5    # 时间惩罚权重：在保证精度的前提下，逼迫 T_win 尽可能缩小
 
-        # 核心修复：彻底解决梯度卡死！
-        # 使用 raw 变量配合 Sigmoid。初始化为 2.0，经过 sigmoid 后约为 0.88。
-        # 也就是初始分配 88% 的满功率和时间，给优化器留出 "往上走" 和 "往下走" 的梯度空间。
+        # 利用sigmod函数留出优化空间
         self.raw_P_UE = nn.Parameter(torch.ones(N, K) * 2.0)
         self.raw_T_win = nn.Parameter(torch.ones(N) * 2.0)
 
@@ -43,17 +41,12 @@ class DMFL_ResourceOptimizer(nn.Module):
         T_up = self.S_omega / (R_UL + 1e-9)
         T_req = T_train + T_up
 
-        # ==========================================================
-        # 步骤 1：连续松弛 (Continuous Relaxation)
-        # ==========================================================
+
+        # 步骤 1：连续松弛
         T_win_expanded = T_win.unsqueeze(1).expand(self.N, self.K)
         gap = (T_win_expanded - T_req) / (self.T_deadline + 1e-6)
         State = torch.sigmoid(gamma * gap)
-
-        # ==========================================================
-        # 新型优化目标构建
-        # ==========================================================
-        # 1. 误差上界 L_bound (迫使窗口扩大，功率拉高，避免截断)
+        # 1. 误差上界 L_bound
         comm_noise = self.sigma_noise_sq / (h_sq * P_UE + 1e-9)
         E_n_k = State * comm_noise + (1.0 - State) * (self.Delta_diff_sq + 1.0)
         E_n = torch.mean(E_n_k, dim=1)
@@ -61,18 +54,17 @@ class DMFL_ResourceOptimizer(nn.Module):
         weights = D_n / (torch.sum(D_n) + 1e-9)
         L_bound = torch.sum(weights * E_n)
 
-        # 2. 通信能耗 E_total (迫使功率下降)
+        # 2. 通信能耗 E_total
         E_energy_nk = State * (P_UE * T_up)
         E_total = torch.mean(torch.sum(E_energy_nk, dim=1))
 
-        # 3. 时间窗口惩罚 (迫使 T_win 缩小，节约系统等待时间)
+        # 3. 时间窗口惩罚
         T_penalty = torch.mean(T_win)
 
         # 4. K_min 基础底线惩罚
         succ_devices_per_SBS = torch.sum(State, dim=1)
         penalty_Kmin = torch.sum(torch.relu(self.K_min - succ_devices_per_SBS) ** 2)
 
-        # 综合目标：误差 + 能耗 + 时间窗口压缩
         loss = L_bound + self.rho_energy * E_total + self.rho_time * T_penalty + 10.0 * penalty_Kmin
         return loss
 
@@ -84,11 +76,8 @@ def run_resource_optimization(N, K, param_dim, current_state, device):
     T_diff = torch.tensor(current_state['T_diff'], dtype=torch.float32, device=device)
 
     model = DMFL_ResourceOptimizer(N, K, param_dim).to(device)
-
-    # ==========================================================
     # 步骤 2：序列二次规划寻优 (SQP)
     # 赋予足够大的学习率，让变量能迅速脱离初始状态
-    # ==========================================================
     optimizer = optim.Adam([
         {'params': model.raw_P_UE, 'lr': 0.1},
         {'params': model.raw_T_win, 'lr': 0.1}
