@@ -4,81 +4,62 @@ from config import args
 
 
 def get_dataset():
-    """根据 config 自动下载并返回对应数据集"""
     if args.dataset_name == 'cifar10':
-        transform_train = transforms.Compose([
+        train_tf = transforms.Compose([
             transforms.RandomCrop(32, padding=4),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
         ])
-        transform_test = transforms.Compose([
+        test_tf = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
         ])
-        train_dataset = datasets.CIFAR10(args.data_path, train=True, download=True, transform=transform_train)
-        test_dataset = datasets.CIFAR10(args.data_path, train=False, download=True, transform=transform_test)
+        train_ds = datasets.CIFAR10(args.data_path, train=True, download=True, transform=train_tf)
+        test_ds = datasets.CIFAR10(args.data_path, train=False, download=True, transform=test_tf)
     elif args.dataset_name == 'mnist':
-        transform = transforms.Compose([
+        tf = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize((0.5,), (0.5,))
+            transforms.Normalize((0.5,), (0.5,)),
         ])
-        train_dataset = datasets.MNIST(args.data_path, train=True, download=True, transform=transform)
-        test_dataset = datasets.MNIST(args.data_path, train=False, download=True, transform=transform)
+        train_ds = datasets.MNIST(args.data_path, train=True, download=True, transform=tf)
+        test_ds = datasets.MNIST(args.data_path, train=False, download=True, transform=tf)
     else:
-        raise ValueError("不支持的数据集。")
-    return train_dataset, test_dataset
+        raise ValueError(f"不支持的数据集: {args.dataset_name}")
+    return train_ds, test_ds
 
 
 def split_data(dataset, num_users):
-    """
-    层级混合数据划分 (Hierarchical Hybrid Distribution):
-    - 全局 Non-IID：基站间标签高度异构。
-    - 簇内可调 IID：通过 inner_iid_degree 控制簇内客户端的异构程度。
-    """
-    num_edges = args.num_edge_servers
-    users_per_edge = num_users // num_edges
+    """层级混合划分：edge 间 Non-IID，edge 内按 inner_client_iid 混合。"""
+    n_edge = args.num_edge_servers
+    u_per = num_users // n_edge
     iid_deg = args.inner_client_iid
 
     labels = np.array(dataset.targets)
-    idxs = np.arange(len(labels))
+    idx = np.arange(len(labels))
 
-    # 1. 按照标签排序 (全局 Non-IID 基础)
-    idxs_labels = np.vstack((idxs, labels))
-    idxs_labels = idxs_labels[:, idxs_labels[1, :].argsort()]
-    sorted_idxs = idxs_labels[0, :]
+    # 按标签排序后均匀切分给各 edge（保证 edge 间 Non-IID）
+    sorted_idx = idx[labels.argsort()]
+    shards = np.array_split(sorted_idx, n_edge)
 
-    # 2. 将全局数据切分为 3 个宏分片给 3 个基站
-    macro_shards = np.array_split(sorted_idxs, num_edges)
-    dict_users = {i: np.array([], dtype='int64') for i in range(num_users)}
+    user_map = {i: np.array([], dtype='int64') for i in range(num_users)}
 
-    np.random.seed(1234)
+    for eid in range(n_edge):
+        shard = shards[eid]
+        total = len(shard)
+        n_iid = int(total * iid_deg)
 
-    for edge_idx in range(num_edges):
-        edge_data = macro_shards[edge_idx]
-        total_edge_samples = len(edge_data)
-
-        # 计算该基站下 IID 和 Non-IID 部分的数据量
-        num_iid = int(total_edge_samples * iid_deg)
-
-        # 3. 提取 IID 部分并打乱
-        iid_pool = edge_data[:num_iid]
+        iid_pool = shard[:n_iid].copy()
         np.random.shuffle(iid_pool)
-        iid_client_shards = np.array_split(iid_pool, users_per_edge)
+        iid_splits = np.array_split(iid_pool, u_per)
 
-        # 4. 提取 Non-IID 部分并保持排序 (以保证内部客户端标签不平衡)
-        non_iid_pool = edge_data[num_iid:]
-        # 为了增加难度，Non-IID 部分不打乱，直接按顺序切分
-        niid_client_shards = np.array_split(non_iid_pool, users_per_edge)
+        niid_pool = shard[n_iid:]
+        niid_splits = np.array_split(niid_pool, u_per)
 
-        for local_i in range(users_per_edge):
-            global_idx = edge_idx * users_per_edge + local_i
+        for j in range(u_per):
+            uid = eid * u_per + j
+            combined = np.concatenate([iid_splits[j], niid_splits[j]])
+            np.random.shuffle(combined)
+            user_map[uid] = combined
 
-            # 合并该客户端的两部分数据
-            combined_idxs = np.concatenate((iid_client_shards[local_i], niid_client_shards[local_i]))
-            # 最终打乱该客户端的本地数据，模拟本地训练的随机性
-            np.random.shuffle(combined_idxs)
-
-            dict_users[global_idx] = combined_idxs
-
-    return dict_users
+    return user_map
