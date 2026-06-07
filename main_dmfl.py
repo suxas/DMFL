@@ -1,6 +1,8 @@
 import sys
 import torch
 import torch.optim as optim
+import matplotlib.pyplot as plt
+from utils import plot_shadow
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
@@ -84,14 +86,12 @@ def run_dmfl(skip_train_eval=False):
             for i in dropped:
                 base = st.hist[i].clone()
                 if rnd > args.warmup_rounds and torch.norm(base) > 0:
-                    # 扩散模型预测分类头增量
                     head_hist = base[-diff_dim:].unsqueeze(0)
                     delta = st.diffusion.generate(head_hist).squeeze(0)
                     if torch.norm(delta) > torch.norm(head_hist):
-                        delta = delta * (torch.norm(head_hist) / (torch.norm(delta) + 1e-6)) * 0.8
+                        delta = delta * (torch.norm(head_hist) / (torch.norm(delta) + 1e-6))
                     fake_head = base[-diff_dim:] + delta
 
-                    # 特征提取器按 IID 比例插值
                     hist_feat = base[:feat_dim]
                     fake_feat = (args.inner_client_iid * avg_feat +
                                  (1.0 - args.inner_client_iid) * hist_feat) if active else hist_feat
@@ -107,7 +107,7 @@ def run_dmfl(skip_train_eval=False):
                 ds = TensorDataset(torch.stack(st.buf_y), torch.stack(st.buf_x))
                 loader = DataLoader(ds, batch_size=32, shuffle=True)
                 st.diffusion.train()
-                for _ in range(10):
+                for _ in range(30):
                     for targ, hist in loader:
                         loss = st.diffusion.train_step(targ, hist)
                         st.opt.zero_grad()
@@ -120,7 +120,6 @@ def run_dmfl(skip_train_eval=False):
         if edge_grads:
             g_global = sum(edge_grads) / args.num_users
             unflatten_params(model, flatten_params(model) - g_global)
-
         acc_v, loss_v = evaluate(model, test_ds, args.batch_size)
         v_acc.append(acc_v)
         v_loss.append(loss_v)
@@ -136,3 +135,36 @@ def run_dmfl(skip_train_eval=False):
         pbar.set_postfix({'Val Acc': f'{acc_v:.2f}%', 'Val Loss': f'{loss_v:.4f}'})
 
     return t_acc, t_loss, v_acc, v_loss
+
+if __name__ == '__main__':
+    _, _, acc_dmfl, loss_dmfl = run_dmfl(skip_train_eval=True)
+
+    rnds = range(1, args.num_global_rounds + 1)
+
+    # 精度对比
+    fig1 = plt.figure(1, figsize=(10, 6))
+    plot_shadow(plt, rnds, acc_dmfl, 'blue', 'DMFL')
+    if args.warmup_rounds > 0:
+        plt.axvline(args.warmup_rounds, color='gray', linestyle=':', label='Warm-up')
+    plt.xlabel('Rounds')
+    plt.ylabel('Val Accuracy (%)')
+    plt.title(f'{args.dataset_name.upper()} Accuracy')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(f'Results_Accuracy_{args.dataset_name}_Rounds{args.num_global_rounds}_Shadow_DMFL.png', dpi=300)
+
+    # Loss 对比
+    fig2 = plt.figure(2, figsize=(10, 6))
+    plot_shadow(plt, rnds, loss_dmfl, 'blue', 'DMFL')
+    if args.warmup_rounds > 0:
+        plt.axvline(args.warmup_rounds, color='gray', linestyle=':', label='Warm-up')
+    plt.xlabel('Rounds')
+    plt.ylabel('Val Loss')
+    plt.title(f'{args.dataset_name.upper()} Loss')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(f'Results_Loss_{args.dataset_name}_Rounds{args.num_global_rounds}_Shadow_DMFL.png', dpi=300)
+
+    plt.show()

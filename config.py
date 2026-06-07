@@ -11,12 +11,12 @@ class Config:
     # --- 联邦学习 ---
     num_users = 30
     num_edge_servers = 3
-    num_global_rounds = 300
+    num_global_rounds = 3     #必改
     num_local_epochs = 3          # mnist: 3, cifar10: 1
     batch_size = 64
     lr = 0.001
     momentum = 0.5
-    inner_client_iid = 0
+    inner_client_iid = 0.1          #必改
 
     # --- 物理层 ---
     bandwidth = 1e6
@@ -25,7 +25,7 @@ class Config:
     f_cpu_min = 1e9
     f_cpu_max = 2e9
     cycles_per_sample = 2e4
-    target_straggler_rate = 0.7
+    target_straggler_rate = 0.5   #必改
     t_deadline = 99999.0
     noise_scale = 0.001
 
