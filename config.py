@@ -11,12 +11,12 @@ class Config:
     # --- 联邦学习 ---
     num_users = 30
     num_edge_servers = 3
-    num_global_rounds = 3     #必改
-    num_local_epochs = 3          # mnist: 3, cifar10: 1
+    num_global_rounds = 30     #必改
+    num_local_epochs = 3         # mnist: 3, cifar10: 1
     batch_size = 64
     lr = 0.001
     momentum = 0.5
-    inner_client_iid = 0.1          #必改
+    inner_client_iid = 0.1         #必改 0，0.1
 
     # --- 物理层 ---
     bandwidth = 1e6

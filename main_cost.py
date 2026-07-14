@@ -6,7 +6,7 @@ from models.network import SimpleCNN, VGG11CIFAR
 
 
 def set_modern_style():
-    plt.rcParams['font.sans-serif'] = ['Segoe UI', 'Arial', 'Helvetica', 'DejaVu Sans']
+    plt.rcParams['font.sans-serif'] = ['Times New Roman']
     plt.rcParams['axes.facecolor'] = '#F8F9FA'
     plt.rcParams['figure.facecolor'] = '#FFFFFF'
     plt.rcParams['grid.color'] = '#DEE2E6'
@@ -81,15 +81,20 @@ def calc_costs():
     x_pos = np.arange(len(labels))
     width = 0.55
 
-
+    # ------------------ 图表 1 ------------------
     fig1, ax1 = plt.subplots(figsize=(8, 6))
     comm_vals = [comm_fedavg, comm_salf, comm_dmfl]
     b1 = draw_3d_bars(ax1, x_pos, comm_vals, colors, width)
 
-    ax1.set_title(f'Upload Communication Cost ({args.dataset_name.upper()})', fontsize=16, fontweight='bold', pad=15)
-    ax1.set_ylabel('Data Transfer (MB)', fontsize=13, fontweight='bold')
+    ax1.set_title(f'Upload Communication Cost ({args.dataset_name.upper()})', fontsize=22, pad=15)
+    ax1.set_ylabel('Data Transfer (MB)', fontsize=20)
     ax1.set_xticks(x_pos)
-    ax1.set_xticklabels(labels, fontsize=14, fontweight='bold')
+    ax1.set_xticklabels(labels, fontsize=20)
+
+    # 遍历标签，仅将文本为 'DMFL' 的刻度标签加粗
+    for tick_label in ax1.get_xticklabels():
+        if tick_label.get_text() == 'DMFL':
+            tick_label.set_fontweight('bold')
 
     ax1.spines['top'].set_visible(False)
     ax1.spines['right'].set_visible(False)
@@ -101,21 +106,26 @@ def calc_costs():
     for bar in b1:
         txt = ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() * 1.02,
                        f'{bar.get_height():.2f}', ha='center', va='bottom',
-                       fontsize=13, fontweight='bold', color='#2B2D42', zorder=5)
+                       fontsize=18, fontweight='bold', color='#2B2D42', zorder=5)
         txt.set_path_effects([path_effects.Stroke(linewidth=3, foreground='white'), path_effects.Normal()])
 
     fig1.tight_layout()
     fig1.savefig(f'Results_Cost1_Comm_{args.dataset_name}_VGG.png', dpi=400, bbox_inches='tight')
 
-
+    # ------------------ 图表 2 ------------------
     fig2, ax2 = plt.subplots(figsize=(8, 6))
     client_comps = [client_comp_fedavg, client_comp_salf, client_comp_dmfl]
     b2 = draw_3d_bars(ax2, x_pos, client_comps, colors, width)
 
-    ax2.set_title(f'Client Computation Cost ({args.dataset_name.upper()})', fontsize=16, fontweight='bold', pad=15)
-    ax2.set_ylabel('Operations (MFLOPs)', fontsize=13, fontweight='bold')
+    ax2.set_title(f'Client Computation Cost ({args.dataset_name.upper()})', fontsize=22, pad=15)
+    ax2.set_ylabel('Operations (MFLOPs)', fontsize=20)
     ax2.set_xticks(x_pos)
-    ax2.set_xticklabels(labels, fontsize=14, fontweight='bold')
+    ax2.set_xticklabels(labels, fontsize=20)
+
+    # 遍历标签，仅将文本为 'DMFL' 的刻度标签加粗
+    for tick_label in ax2.get_xticklabels():
+        if tick_label.get_text() == 'DMFL':
+            tick_label.set_fontweight('bold')
 
     ax2.spines['top'].set_visible(False)
     ax2.spines['right'].set_visible(False)
@@ -127,12 +137,11 @@ def calc_costs():
     for bar in b2:
         txt = ax2.text(bar.get_x() + bar.get_width() / 2, bar.get_height() * 1.02,
                        f'{bar.get_height():,.0f}', ha='center', va='bottom',
-                       fontsize=13, fontweight='bold', color='#2B2D42', zorder=5)
+                       fontsize=18, fontweight='bold', color='#2B2D42', zorder=5)
         txt.set_path_effects([path_effects.Stroke(linewidth=3, foreground='white'), path_effects.Normal()])
 
     fig2.tight_layout()
     fig2.savefig(f'Results_Cost2_Comp_{args.dataset_name}_VGG.png', dpi=400, bbox_inches='tight')
-
 
     plt.show()
 

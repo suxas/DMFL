@@ -143,7 +143,7 @@ if __name__ == '__main__':
 
     # 精度对比
     fig1 = plt.figure(1, figsize=(10, 6))
-    plot_shadow(plt, rnds, acc_dmfl, 'blue', 'DMFL')
+    plot_shadow(plt, rnds, acc_dmfl, 'blue', 'DMFL', marker='D', linestyle=':')
     if args.warmup_rounds > 0:
         plt.axvline(args.warmup_rounds, color='gray', linestyle=':', label='Warm-up')
     plt.xlabel('Rounds')
@@ -156,7 +156,7 @@ if __name__ == '__main__':
 
     # Loss 对比
     fig2 = plt.figure(2, figsize=(10, 6))
-    plot_shadow(plt, rnds, loss_dmfl, 'blue', 'DMFL')
+    plot_shadow(plt, rnds, loss_dmfl, 'blue', 'DMFL', marker='D', linestyle=':')
     if args.warmup_rounds > 0:
         plt.axvline(args.warmup_rounds, color='gray', linestyle=':', label='Warm-up')
     plt.xlabel('Rounds')
