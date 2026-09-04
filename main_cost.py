@@ -7,8 +7,8 @@ from models.network import SimpleCNN, VGG11CIFAR
 
 def set_modern_style():
     plt.rcParams['font.sans-serif'] = ['Times New Roman']
-    plt.rcParams['axes.facecolor'] = '#F8F9FA'
-    plt.rcParams['figure.facecolor'] = '#FFFFFF'
+    plt.rcParams['axes.facecolor'] = '#FFFFFF'  # 纯白绘图区背景
+    plt.rcParams['figure.facecolor'] = '#FFFFFF'  # 纯白画布背景
     plt.rcParams['grid.color'] = '#DEE2E6'
     plt.rcParams['grid.linestyle'] = '--'
     plt.rcParams['axes.edgecolor'] = '#CED4DA'
@@ -16,19 +16,22 @@ def set_modern_style():
     plt.rcParams['xtick.color'] = '#495057'
     plt.rcParams['ytick.color'] = '#495057'
 
+    # 坐标轴文字大小配置
+    plt.rcParams['axes.titlesize'] = 22
+    plt.rcParams['axes.labelsize'] = 20
+    plt.rcParams['xtick.labelsize'] = 20
+    plt.rcParams['ytick.labelsize'] = 18
+
 
 def draw_3d_bars(ax, x_pos, values, colors, width=0.5):
     """绘制具有3D厚度感和高光质感的柱状图"""
-    # 绘制多层阴影
     for i in range(10, 0, -1):
         ax.bar(x_pos + i * 0.005, values, width,
                color='black', alpha=0.015, zorder=1, edgecolor='none')
 
-    # 主柱体
     bars = ax.bar(x_pos, values, width,
                   color=colors, edgecolor='#343A40', linewidth=1.2, zorder=3)
 
-    # 玻璃高光
     ax.bar(x_pos - width / 2 + 0.02, values, 0.03,
            color='white', alpha=0.35, zorder=4, edgecolor='none')
 
@@ -36,7 +39,6 @@ def draw_3d_bars(ax, x_pos, values, colors, width=0.5):
 
 
 def calc_costs():
-    # 强制覆盖配置，确保运行 CIFAR-10 环境
     args.dataset_name = 'cifar10'
     args.num_local_epochs = 1
 
@@ -47,7 +49,6 @@ def calc_costs():
         model = SimpleCNN()
         total_samples = 60000
 
-    # 1. 模型参数量解析
     sizes = [p.numel() for p in model.parameters()]
     p_dim = sum(sizes)
     model_mb = p_dim * 4 / (1024 * 1024)
@@ -57,7 +58,6 @@ def calc_costs():
     n_drop = args.num_users - n_surv
 
     # [A] 上行通信开销 (MB/轮)
-    # FedAvg 和 DMFL 一致：时间窗到达后，只接收存活者，掉队者直接放弃上传
     comm_fedavg = n_surv * model_mb
     comm_dmfl = n_surv * model_mb
 
@@ -66,7 +66,6 @@ def calc_costs():
     comm_salf = n_surv * model_mb + n_drop * partial_mb
 
     # [B] 客户端终端计算开销 (MFLOPs/轮)
-    # 公式: 3(1前向+2反向) * 参数量 * 样本数 * Epoch
     samples_per_client = total_samples / args.num_users
     comp_per_client_full = (args.num_local_epochs * samples_per_client * (3 * p_dim)) / 1e6
     comp_per_client_partial = (args.num_local_epochs * samples_per_client * (3 * avg_partial)) / 1e6
@@ -86,15 +85,18 @@ def calc_costs():
     comm_vals = [comm_fedavg, comm_salf, comm_dmfl]
     b1 = draw_3d_bars(ax1, x_pos, comm_vals, colors, width)
 
-    ax1.set_title(f'Upload Communication Cost ({args.dataset_name.upper()})', fontsize=22, pad=15)
+    ax1.set_title(f'Upload Communication Cost ({args.dataset_name.upper()})', pad=15)
     ax1.set_ylabel('Data Transfer (MB)', fontsize=20)
     ax1.set_xticks(x_pos)
     ax1.set_xticklabels(labels, fontsize=20)
+    ax1.tick_params(axis='y', labelsize=16)
 
-    # 遍历标签，仅将文本为 'DMFL' 的刻度标签加粗
+    # 仅将 'DMFL' 刻度标签加粗
     for tick_label in ax1.get_xticklabels():
         if tick_label.get_text() == 'DMFL':
             tick_label.set_fontweight('bold')
+        else:
+            tick_label.set_fontweight('normal')
 
     ax1.spines['top'].set_visible(False)
     ax1.spines['right'].set_visible(False)
@@ -103,10 +105,12 @@ def calc_costs():
     ax1.set_axisbelow(True)
     ax1.set_ylim(0, max(comm_vals) * 1.15)
 
-    for bar in b1:
+    # 仅加粗 DMFL 的柱顶数值
+    for label, bar in zip(labels, b1):
+        weight = 'bold' if label == 'DMFL' else 'normal'
         txt = ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() * 1.02,
                        f'{bar.get_height():.2f}', ha='center', va='bottom',
-                       fontsize=18, fontweight='bold', color='#2B2D42', zorder=5)
+                       fontsize=18, fontweight=weight, color='#2B2D42', zorder=5)
         txt.set_path_effects([path_effects.Stroke(linewidth=3, foreground='white'), path_effects.Normal()])
 
     fig1.tight_layout()
@@ -117,15 +121,18 @@ def calc_costs():
     client_comps = [client_comp_fedavg, client_comp_salf, client_comp_dmfl]
     b2 = draw_3d_bars(ax2, x_pos, client_comps, colors, width)
 
-    ax2.set_title(f'Client Computation Cost ({args.dataset_name.upper()})', fontsize=22, pad=15)
+    ax2.set_title(f'Client Computation Cost ({args.dataset_name.upper()})', pad=15)
     ax2.set_ylabel('Operations (MFLOPs)', fontsize=20)
     ax2.set_xticks(x_pos)
     ax2.set_xticklabels(labels, fontsize=20)
+    ax2.tick_params(axis='y', labelsize=16)
 
-    # 遍历标签，仅将文本为 'DMFL' 的刻度标签加粗
+    # 仅将 'DMFL' 刻度标签加粗
     for tick_label in ax2.get_xticklabels():
         if tick_label.get_text() == 'DMFL':
             tick_label.set_fontweight('bold')
+        else:
+            tick_label.set_fontweight('normal')
 
     ax2.spines['top'].set_visible(False)
     ax2.spines['right'].set_visible(False)
@@ -134,10 +141,11 @@ def calc_costs():
     ax2.set_axisbelow(True)
     ax2.set_ylim(0, max(client_comps) * 1.15)
 
-    for bar in b2:
+    for label, bar in zip(labels, b2):
+        weight = 'bold' if label == 'DMFL' else 'normal'
         txt = ax2.text(bar.get_x() + bar.get_width() / 2, bar.get_height() * 1.02,
                        f'{bar.get_height():,.0f}', ha='center', va='bottom',
-                       fontsize=18, fontweight='bold', color='#2B2D42', zorder=5)
+                       fontsize=18, fontweight=weight, color='#2B2D42', zorder=5)
         txt.set_path_effects([path_effects.Stroke(linewidth=3, foreground='white'), path_effects.Normal()])
 
     fig2.tight_layout()
