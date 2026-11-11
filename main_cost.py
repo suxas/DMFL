@@ -17,10 +17,10 @@ def set_modern_style():
     plt.rcParams['ytick.color'] = '#495057'
 
     # 坐标轴文字大小配置
-    plt.rcParams['axes.titlesize'] = 22
-    plt.rcParams['axes.labelsize'] = 20
-    plt.rcParams['xtick.labelsize'] = 20
-    plt.rcParams['ytick.labelsize'] = 18
+    plt.rcParams['axes.titlesize'] = 26
+    plt.rcParams['axes.labelsize'] = 24
+    plt.rcParams['xtick.labelsize'] = 24
+    plt.rcParams['ytick.labelsize'] = 22
 
 
 def draw_3d_bars(ax, x_pos, values, colors, width=0.5):
@@ -85,7 +85,7 @@ def calc_costs():
     comm_vals = [comm_fedavg, comm_salf, comm_dmfl]
     b1 = draw_3d_bars(ax1, x_pos, comm_vals, colors, width)
 
-    ax1.set_title(f'Upload Communication Cost ({args.dataset_name.upper()})', pad=15)
+    ax1.set_title(f'Upload Communication Cost', pad=15)
     ax1.set_ylabel('Data Transfer (MB)', fontsize=20)
     ax1.set_xticks(x_pos)
     ax1.set_xticklabels(labels, fontsize=20)
@@ -121,7 +121,7 @@ def calc_costs():
     client_comps = [client_comp_fedavg, client_comp_salf, client_comp_dmfl]
     b2 = draw_3d_bars(ax2, x_pos, client_comps, colors, width)
 
-    ax2.set_title(f'Client Computation Cost ({args.dataset_name.upper()})', pad=15)
+    ax2.set_title(f'Client Computation Cost', pad=15)
     ax2.set_ylabel('Operations (MFLOPs)', fontsize=20)
     ax2.set_xticks(x_pos)
     ax2.set_xticklabels(labels, fontsize=20)

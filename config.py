@@ -6,17 +6,17 @@ torch.backends.cudnn.deterministic = False
 
 class Config:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    dataset_name = 'cifar10'  # mnist / cifar10
+    dataset_name = 'mnist'  # mnist / cifar10
 
     # --- 联邦学习 ---
     num_users = 30
     num_edge_servers = 3
-    num_global_rounds = 1000    #必改
-    num_local_epochs = 1        # mnist: 3, cifar10: 1
+    num_global_rounds = 300    #必改
+    num_local_epochs = 3        # mnist: 3, cifar10: 1
     batch_size = 64
     lr = 0.001
     momentum = 0.5
-    inner_client_iid = 0        #必改 0，0.1
+    inner_client_iid = 0.1        #必改 0，0.1
 
     # --- 物理层 ---
     bandwidth = 1e6
